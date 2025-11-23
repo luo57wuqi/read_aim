@@ -1,12 +1,12 @@
+
 import React, { useState, useRef } from 'react';
-import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode } from '../types';
-import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon } from './Icons';
+import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode, Theme, CustomApiConfig } from '../types';
+import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon } from './Icons';
 
 interface SettingsViewProps {
   onClose: () => void;
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
-  // Data props for export
   data: {
       articles: Article[];
       savedItems: SavedItem[];
@@ -26,23 +26,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     onMergeVocabulary
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
+  const [activeTab, setActiveTab] = useState<'general' | 'advanced'>('general');
+  const [includeImages, setIncludeImages] = useState(false); // Default false to save space
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vocabInputRef = useRef<HTMLInputElement>(null);
 
+  // --- Theme Logic ---
+  const themes: { id: Theme; name: string; color: string }[] = [
+      { id: 'light', name: '默白 (Light)', color: '#f8fafc' },
+      { id: 'dark', name: '夜间 (Dark)', color: '#0f172a' },
+      { id: 'sepia', name: '羊皮纸 (Sepia)', color: '#f4ecd8' },
+      { id: 'forest', name: '森林 (Forest)', color: '#0f291e' },
+      { id: 'amethyst', name: '紫罗兰 (Amethyst)', color: '#2e1065' },
+  ];
+
+  // --- API Config Helpers ---
+  const updateApiConfig = (field: keyof CustomApiConfig, value: any) => {
+      setLocalSettings(prev => ({
+          ...prev,
+          customApiConfig: {
+              url: '',
+              method: 'GET',
+              headers: [],
+              bodyTemplate: '',
+              responseMapping: '',
+              ...prev.customApiConfig,
+              [field]: value
+          }
+      }));
+  };
+
+  const addHeader = () => {
+      const current = localSettings.customApiConfig?.headers || [];
+      updateApiConfig('headers', [...current, { key: '', value: '' }]);
+  };
+
+  const updateHeader = (index: number, field: 'key' | 'value', val: string) => {
+      const current = [...(localSettings.customApiConfig?.headers || [])];
+      current[index] = { ...current[index], [field]: val };
+      updateApiConfig('headers', current);
+  };
+
+  const removeHeader = (index: number) => {
+      const current = [...(localSettings.customApiConfig?.headers || [])];
+      current.splice(index, 1);
+      updateApiConfig('headers', current);
+  };
+
+  // --- Export Logic ---
   const handleExport = () => {
-      // Clean up data for export
-      // User Requirement: "Most memory efficient way to export text data" if not URL.
-      // Strategy: Remove 'custom_image_base64' from savedItems to keep JSON size low.
       const optimizedSavedItems = data.savedItems.map(item => {
-          if (item.cardData && item.cardData.custom_image_base64) {
-              // Create a shallow copy of cardData excluding the heavy base64 string
+          if (item.cardData && item.cardData.custom_image_base64 && !includeImages) {
               const { custom_image_base64, ...restCardData } = item.cardData;
-              return {
-                  ...item,
-                  cardData: {
-                      ...restCardData,
-                  }
-              };
+              return { ...item, cardData: restCardData };
           }
           return item;
       });
@@ -57,63 +94,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           settings: localSettings
       };
       
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `english-reader-backup-${new Date().toISOString().slice(0,10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadJSON(backup, `reader-backup-${new Date().toISOString().slice(0,10)}.json`);
   };
 
   const handleExportVocabulary = () => {
       const words = data.savedItems.filter(item => item.type === 'word');
-      // Similar optimization for images
       const optimizedWords = words.map(item => {
-        if (item.cardData && item.cardData.custom_image_base64) {
+        if (item.cardData && item.cardData.custom_image_base64 && !includeImages) {
             const { custom_image_base64, ...restCardData } = item.cardData;
             return { ...item, cardData: restCardData };
         }
         return item;
       });
-      
-      const blob = new Blob([JSON.stringify(optimizedWords, null, 2)], { type: 'application/json' });
+      downloadJSON(optimizedWords, `vocabulary-db-${new Date().toISOString().slice(0,10)}.json`);
+  };
+
+  const downloadJSON = (obj: any, filename: string) => {
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `vocabulary-db-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
   };
 
+  // --- Import Logic ---
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-
       const reader = new FileReader();
       reader.onload = (event) => {
           try {
               const json = JSON.parse(event.target?.result as string);
-              // Basic validation
               if (json.version && Array.isArray(json.articles)) {
-                  if(confirm("This will overwrite your current data. Are you sure?")) {
+                  if(confirm("确定覆盖当前数据吗？ (Are you sure to overwrite?)")) {
                       onImportData(json as BackupData);
                       onClose();
                   }
               } else {
-                  alert("Invalid backup file format.");
+                  alert("格式错误 (Invalid format)");
               }
-          } catch (err) {
-              alert("Failed to parse JSON file.");
-              console.error(err);
-          } finally {
-               // Reset input so "onChange" triggers again for the same file if needed
-               if (fileInputRef.current) fileInputRef.current.value = '';
-          }
+          } catch { alert("JSON解析失败 (Parse Failed)"); }
+          if (fileInputRef.current) fileInputRef.current.value = '';
       };
       reader.readAsText(file);
   };
@@ -121,7 +146,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleImportVocabulary = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-
       const reader = new FileReader();
       reader.onload = (event) => {
           try {
@@ -129,206 +153,246 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               if (Array.isArray(json)) {
                   onMergeVocabulary(json as SavedItem[]);
                   onClose();
-              } else {
-                  alert("Invalid vocabulary file format. Expected an array.");
-              }
-          } catch (err) {
-              alert("Failed to parse vocabulary file.");
-              console.error(err);
-          } finally {
-               if (vocabInputRef.current) vocabInputRef.current.value = '';
-          }
+              } else { alert("需要数组格式 (Expected Array)"); }
+          } catch { alert("JSON解析失败"); }
+          if (vocabInputRef.current) vocabInputRef.current.value = '';
       };
       reader.readAsText(file);
   };
 
-  const handleModeSelect = (mode: DataSourceMode) => {
-      setLocalSettings(prev => ({ ...prev, dataSourceMode: mode }));
-  };
-
   return (
-    <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-slide-up-mobile md:animate-fade-in">
+    <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col overflow-hidden animate-slide-up-mobile md:animate-fade-in">
             {/* Header */}
-            <div className="bg-slate-50 border-b border-slate-200 p-4 flex justify-between items-center">
+            <div className="bg-slate-50 border-b border-slate-200 p-4 flex justify-between items-center shrink-0">
                 <h2 className="font-bold text-lg text-slate-800 flex items-center gap-2">
                     <CogIcon className="w-5 h-5 text-indigo-600" />
-                    Settings & Data
+                    设置与数据 (Settings)
                 </h2>
                 <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">
                     <XMarkIcon className="w-5 h-5" />
                 </button>
             </div>
 
-            <div className="p-6 space-y-8 max-h-[80vh] overflow-y-auto">
-                
-                {/* Data Source Configuration */}
-                <div>
-                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Data Sources</h3>
-                     <div className="grid grid-cols-1 gap-3">
-                         <button 
-                             onClick={() => handleModeSelect('ai')}
-                             className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${localSettings.dataSourceMode === 'ai' ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-200 hover:bg-slate-50'}`}
-                         >
-                             <div className={`p-2 rounded-full ${localSettings.dataSourceMode === 'ai' ? 'bg-indigo-200 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>
-                                 <BrainIcon className="w-5 h-5" />
-                             </div>
-                             <div>
-                                 <p className="font-semibold text-slate-800">AI Generation (Default)</p>
-                                 <p className="text-xs text-slate-500">Dynamically generate cards using Gemini AI. Always checks local cache first.</p>
-                             </div>
-                         </button>
-
-                         <button 
-                             onClick={() => handleModeSelect('local_only')}
-                             className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${localSettings.dataSourceMode === 'local_only' ? 'bg-emerald-50 border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-200 hover:bg-slate-50'}`}
-                         >
-                             <div className={`p-2 rounded-full ${localSettings.dataSourceMode === 'local_only' ? 'bg-emerald-200 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                                 <BookOpenIcon className="w-5 h-5" />
-                             </div>
-                             <div>
-                                 <p className="font-semibold text-slate-800">Local Cache Only</p>
-                                 <p className="text-xs text-slate-500">Only search your saved items. Good for offline review.</p>
-                             </div>
-                         </button>
-                         
-                         <button 
-                             onClick={() => handleModeSelect('custom_api')}
-                             className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${localSettings.dataSourceMode === 'custom_api' ? 'bg-amber-50 border-amber-500 ring-1 ring-amber-500' : 'border-slate-200 hover:bg-slate-50'}`}
-                         >
-                             <div className={`p-2 rounded-full ${localSettings.dataSourceMode === 'custom_api' ? 'bg-amber-200 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-                                 <LinkIcon className="w-5 h-5" />
-                             </div>
-                             <div>
-                                 <p className="font-semibold text-slate-800">Custom API (Advanced)</p>
-                                 <p className="text-xs text-slate-500">Fetch data from a custom JSON endpoint.</p>
-                             </div>
-                         </button>
-                     </div>
-                     
-                     {localSettings.dataSourceMode === 'custom_api' && (
-                         <div className="mt-3 ml-12">
-                             <input 
-                                type="text"
-                                placeholder="https://api.example.com/word?q="
-                                value={localSettings.customApiEndpoint || ''}
-                                onChange={(e) => setLocalSettings(prev => ({ ...prev, customApiEndpoint: e.target.value }))}
-                                className="w-full p-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-amber-500 outline-none"
-                             />
-                             <p className="text-[10px] text-slate-400 mt-1">App will append the word to this URL.</p>
-                         </div>
-                     )}
-                </div>
-
-                {/* AI Configuration */}
-                <div>
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">AI Model Settings</h3>
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Model Name</label>
-                            <input 
-                                type="text" 
-                                value={localSettings.aiModel}
-                                onChange={(e) => setLocalSettings({...localSettings, aiModel: e.target.value})}
-                                placeholder="e.g. gemini-2.5-flash"
-                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Custom API Key</label>
-                            <input 
-                                type="password" 
-                                value={localSettings.customApiKey || ''}
-                                onChange={(e) => setLocalSettings({...localSettings, customApiKey: e.target.value})}
-                                placeholder="Overwrite default API key"
-                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 font-mono"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Data Management Section - Split into Full Backup & Vocabulary DB */}
-                <div className="pt-4 border-t border-slate-100 space-y-6">
-                     
-                     {/* 1. Vocabulary Database Management (Partial Export) */}
-                     <div>
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                             <CardIcon className="w-4 h-4" />
-                             Vocabulary Database
-                        </h3>
-                        <p className="text-xs text-slate-500 mb-3">
-                            Export just your saved words to reuse in other articles or apps. Merging imports adds new words without deleting existing ones.
-                        </p>
-                        <div className="grid grid-cols-2 gap-4">
-                             <button 
-                                onClick={handleExportVocabulary}
-                                className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 transition-all text-sm font-medium text-indigo-700"
-                            >
-                                <DownloadIcon className="w-4 h-4" />
-                                Export Vocab Only
-                             </button>
-
-                             <button 
-                                onClick={() => vocabInputRef.current?.click()}
-                                className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 transition-all text-sm font-medium text-indigo-700"
-                            >
-                                <UploadIcon className="w-4 h-4" />
-                                Merge Vocab JSON
-                             </button>
-                             <input 
-                                ref={vocabInputRef}
-                                type="file" 
-                                accept=".json"
-                                onChange={handleImportVocabulary}
-                                className="hidden" 
-                            />
-                         </div>
-                     </div>
-
-                     {/* 2. Full System Backup (Overwrite) */}
-                     <div>
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Full System Backup</h3>
-                        <p className="text-xs text-slate-500 mb-3">
-                            Save everything (Articles, History, Settings). Restoring will <strong className="text-red-500">overwrite</strong> current data.
-                        </p>
-                        <div className="grid grid-cols-2 gap-4">
-                            <button 
-                                onClick={handleExport}
-                                className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
-                            >
-                                <div className="p-2 bg-slate-100 text-slate-600 rounded-full group-hover:bg-slate-200">
-                                    <DownloadIcon className="w-6 h-6" />
-                                </div>
-                                <span className="font-medium text-slate-700 text-sm">Backup Full App</span>
-                            </button>
-
-                            <button 
-                                onClick={() => fileInputRef.current?.click()}
-                                className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
-                            >
-                                <div className="p-2 bg-red-50 text-red-600 rounded-full group-hover:bg-red-100">
-                                    <UploadIcon className="w-6 h-6" />
-                                </div>
-                                <span className="font-medium text-slate-700 text-sm">Restore Backup</span>
-                            </button>
-                            <input 
-                                ref={fileInputRef}
-                                type="file" 
-                                accept=".json"
-                                onChange={handleImportFile}
-                                className="hidden" 
-                            />
-                        </div>
-                     </div>
-                </div>
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 shrink-0">
+                <button 
+                    onClick={() => setActiveTab('general')}
+                    className={`flex-1 py-3 text-sm font-bold border-b-2 ${activeTab === 'general' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                >
+                    通用 & 主题 (General)
+                </button>
+                <button 
+                    onClick={() => setActiveTab('advanced')}
+                    className={`flex-1 py-3 text-sm font-bold border-b-2 ${activeTab === 'advanced' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                >
+                    高级接口 (Advanced API)
+                </button>
             </div>
 
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                
+                {activeTab === 'general' && (
+                    <>
+                    {/* Theme Selector */}
+                    <div>
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">界面主题 (Theme)</h3>
+                        <div className="flex gap-3 overflow-x-auto pb-2">
+                            {themes.map(t => (
+                                <button
+                                    key={t.id}
+                                    onClick={() => setLocalSettings(prev => ({...prev, theme: t.id}))}
+                                    className={`flex flex-col items-center gap-2 group min-w-[80px]`}
+                                >
+                                    <div 
+                                        className={`w-12 h-12 rounded-full shadow-sm border-2 transition-all ${localSettings.theme === t.id ? 'border-indigo-600 scale-110' : 'border-slate-200 group-hover:border-slate-300'}`}
+                                        style={{ backgroundColor: t.color }}
+                                    />
+                                    <span className={`text-xs font-medium ${localSettings.theme === t.id ? 'text-indigo-600' : 'text-slate-500'}`}>
+                                        {t.name}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Data Source Basic */}
+                    <div>
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">数据源 (Data Source)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <button 
+                                onClick={() => setLocalSettings(p => ({...p, dataSourceMode: 'ai'}))}
+                                className={`p-3 rounded-lg border text-center transition-all ${localSettings.dataSourceMode === 'ai' ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500 text-indigo-700' : 'border-slate-200 text-slate-600'}`}
+                            >
+                                <BrainIcon className="w-5 h-5 mx-auto mb-1" />
+                                <span className="text-sm font-bold">Gemini AI</span>
+                            </button>
+                            <button 
+                                onClick={() => setLocalSettings(p => ({...p, dataSourceMode: 'local_only'}))}
+                                className={`p-3 rounded-lg border text-center transition-all ${localSettings.dataSourceMode === 'local_only' ? 'bg-emerald-50 border-emerald-500 ring-1 ring-emerald-500 text-emerald-700' : 'border-slate-200 text-slate-600'}`}
+                            >
+                                <BookOpenIcon className="w-5 h-5 mx-auto mb-1" />
+                                <span className="text-sm font-bold">Local Only</span>
+                            </button>
+                            <button 
+                                onClick={() => setLocalSettings(p => ({...p, dataSourceMode: 'custom_api'}))}
+                                className={`p-3 rounded-lg border text-center transition-all ${localSettings.dataSourceMode === 'custom_api' ? 'bg-amber-50 border-amber-500 ring-1 ring-amber-500 text-amber-700' : 'border-slate-200 text-slate-600'}`}
+                            >
+                                <LinkIcon className="w-5 h-5 mx-auto mb-1" />
+                                <span className="text-sm font-bold">Custom API</span>
+                            </button>
+                        </div>
+                        {localSettings.dataSourceMode === 'ai' && (
+                            <div className="mt-3">
+                                <label className="block text-xs text-slate-500 mb-1">Gemini AI Key (Optional Override)</label>
+                                <input 
+                                    type="password"
+                                    value={localSettings.customApiKey || ''}
+                                    onChange={(e) => setLocalSettings(p => ({...p, customApiKey: e.target.value}))}
+                                    placeholder="Use environment key by default"
+                                    className="w-full p-2 border border-slate-300 rounded text-sm font-mono"
+                                />
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Export / Import */}
+                    <div className="pt-4 border-t border-slate-100">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">数据管理 (Data Management)</h3>
+                        
+                        <div className="flex items-center gap-2 mb-4 bg-yellow-50 p-2 rounded text-xs text-yellow-800 border border-yellow-200">
+                            <input 
+                                type="checkbox" 
+                                id="incImg"
+                                checked={includeImages}
+                                onChange={(e) => setIncludeImages(e.target.checked)}
+                                className="rounded text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <label htmlFor="incImg">备份包含图片 (Include Images) - File size will be larger</label>
+                        </div>
+
+                        <div className="space-y-4">
+                            {/* Vocab Only */}
+                            <div className="flex gap-2">
+                                <button onClick={handleExportVocabulary} className="flex-1 py-2 px-3 bg-white border border-slate-300 rounded text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                    <DownloadIcon className="w-4 h-4" /> 导出单词本
+                                </button>
+                                <button onClick={() => vocabInputRef.current?.click()} className="flex-1 py-2 px-3 bg-white border border-slate-300 rounded text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2">
+                                    <UploadIcon className="w-4 h-4" /> 导入合并单词
+                                </button>
+                            </div>
+
+                            {/* Full Backup */}
+                            <div className="flex gap-2">
+                                <button onClick={handleExport} className="flex-1 py-3 bg-slate-800 text-white rounded text-sm font-bold hover:bg-slate-900 flex items-center justify-center gap-2">
+                                    <DownloadIcon className="w-4 h-4" /> 全量备份
+                                </button>
+                                <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-red-50 text-red-600 border border-red-100 rounded text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2">
+                                    <UploadIcon className="w-4 h-4" /> 恢复备份
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <input ref={vocabInputRef} type="file" accept=".json" onChange={handleImportVocabulary} className="hidden" />
+                    <input ref={fileInputRef} type="file" accept=".json" onChange={handleImportFile} className="hidden" />
+                    </>
+                )}
+
+                {activeTab === 'advanced' && (
+                    <div className="space-y-6">
+                        <div className="bg-amber-50 p-3 rounded text-xs text-amber-800 leading-relaxed border border-amber-100">
+                            <strong>Note:</strong> Custom API mode requires you to configure the request structure manually.
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint URL</label>
+                            <input 
+                                type="text"
+                                value={localSettings.customApiConfig?.url || ''}
+                                onChange={(e) => updateApiConfig('url', e.target.value)}
+                                placeholder="https://api.example.com/v1/analyze?word={{word}}"
+                                className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Available variable: <code>{`{{word}}`}</code></p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Method</label>
+                                <select 
+                                    value={localSettings.customApiConfig?.method || 'GET'}
+                                    onChange={(e) => updateApiConfig('method', e.target.value)}
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-sm bg-white"
+                                >
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                </select>
+                             </div>
+                             <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Response Mapping</label>
+                                <input 
+                                    type="text"
+                                    value={localSettings.customApiConfig?.responseMapping || ''}
+                                    onChange={(e) => updateApiConfig('responseMapping', e.target.value)}
+                                    placeholder="e.g. data.candidates[0].content"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
+                                />
+                             </div>
+                        </div>
+
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs font-bold text-slate-500 uppercase">Headers</label>
+                                <button onClick={addHeader} className="text-[10px] text-indigo-600 font-bold flex items-center gap-1 hover:underline">
+                                    <PlusIcon className="w-3 h-3" /> Add
+                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                {(localSettings.customApiConfig?.headers || []).map((h, idx) => (
+                                    <div key={idx} className="flex gap-2">
+                                        <input 
+                                            placeholder="Key (e.g. Authorization)"
+                                            value={h.key}
+                                            onChange={(e) => updateHeader(idx, 'key', e.target.value)}
+                                            className="flex-1 p-2 border border-slate-300 rounded text-xs font-mono"
+                                        />
+                                        <input 
+                                            placeholder="Value"
+                                            value={h.value}
+                                            onChange={(e) => updateHeader(idx, 'value', e.target.value)}
+                                            className="flex-1 p-2 border border-slate-300 rounded text-xs font-mono"
+                                        />
+                                        <button onClick={() => removeHeader(idx)} className="text-slate-400 hover:text-red-500">
+                                            <TrashIcon className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {localSettings.customApiConfig?.method === 'POST' && (
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Body Template (JSON)</label>
+                                <textarea 
+                                    value={localSettings.customApiConfig?.bodyTemplate || ''}
+                                    onChange={(e) => updateApiConfig('bodyTemplate', e.target.value)}
+                                    placeholder={'{\n  "prompt": "Explain {{word}}",\n  "model": "gpt-4"\n}'}
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-xs h-32"
+                                />
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 shrink-0">
                 <button 
                     onClick={onClose}
                     className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg"
                 >
-                    Cancel
+                    取消 (Cancel)
                 </button>
                 <button 
                     onClick={() => {
@@ -337,7 +401,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }}
                     className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-sm"
                 >
-                    Save Changes
+                    保存 (Save Changes)
                 </button>
             </div>
         </div>

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { SavedItem } from '../types';
+import { SavedItem, Theme } from '../types';
 import { BookmarkIcon, TrashIcon, CardIcon, BookOpenIcon } from './Icons';
 
 interface SidebarProps {
@@ -8,13 +8,21 @@ interface SidebarProps {
   onRemoveItem: (id: string) => void;
   onSelectSavedItem: (item: SavedItem) => void;
   onViewCard: (item: SavedItem) => void;
+  theme?: Theme;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ savedItems, onRemoveItem, onSelectSavedItem, onViewCard }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ savedItems, onRemoveItem, onSelectSavedItem, onViewCard, theme = 'light' }) => {
+  
+  // Theme-based style overrides
+  const isDark = theme === 'dark' || theme === 'forest' || theme === 'amethyst';
+  const bgColor = isDark ? 'bg-slate-900/95' : (theme === 'sepia' ? 'bg-[#f4ecd8]' : 'bg-white');
+  const textColor = isDark ? 'text-slate-200' : 'text-slate-800';
+  const itemBg = isDark ? 'bg-white/5 border-white/10' : (theme === 'sepia' ? 'bg-[#fdf6e3] border-[#eee8d5]' : 'bg-slate-50 border-slate-200');
+  
   return (
-    <div className="w-80 bg-white border-l border-slate-200 h-full flex flex-col shadow-xl">
-      <div className="p-4 border-b border-slate-100 bg-slate-50">
-        <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+    <div className={`w-80 border-l border-transparent h-full flex flex-col shadow-xl transition-colors ${bgColor}`}>
+      <div className={`p-4 border-b ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50/50'}`}>
+        <h2 className={`font-semibold flex items-center gap-2 ${textColor}`}>
           <BookmarkIcon className="w-5 h-5 text-indigo-600" solid={true} />
           Saved Collection
         </h2>
@@ -31,7 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ savedItems, onRemoveItem, onSe
         {savedItems.map((item) => (
           <div 
             key={item.id} 
-            className="bg-slate-50 rounded-lg border border-slate-200 p-3 hover:shadow-md transition-shadow cursor-pointer group relative"
+            className={`${itemBg} rounded-lg border p-3 hover:shadow-md transition-shadow cursor-pointer group relative`}
             onClick={() => onSelectSavedItem(item)}
           >
             <div className="flex justify-between items-start mb-1">
@@ -66,7 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ savedItems, onRemoveItem, onSe
               </div>
             </div>
             
-            <h3 className="font-semibold text-slate-800 mb-1 line-clamp-2">
+            <h3 className={`font-semibold mb-1 line-clamp-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
               {item.original}
             </h3>
             
@@ -76,11 +84,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ savedItems, onRemoveItem, onSe
                </div>
             )}
 
-            <p className="text-sm text-slate-600 line-clamp-3">
+            <p className={`text-sm line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
               {item.translation}
             </p>
             
-            <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1 text-[10px] text-slate-400">
+            <div className={`mt-2 pt-2 border-t flex items-center gap-1 text-[10px] text-slate-400 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
                 <BookOpenIcon className="w-3 h-3" />
                 <span className="truncate">{item.sourceArticleTitle}</span>
             </div>

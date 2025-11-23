@@ -81,12 +81,26 @@ export interface WordUsageData {
 export type WordStatsMap = Record<string, WordUsageData>;
 
 export type DataSourceMode = 'ai' | 'local_only' | 'custom_api';
+export type Theme = 'light' | 'dark' | 'sepia' | 'forest' | 'amethyst';
+
+export interface CustomApiConfig {
+  url: string;
+  method: 'GET' | 'POST';
+  headers: { key: string; value: string }[];
+  bodyTemplate?: string; // e.g. '{"query": "{{word}}"}'
+  responseMapping?: string; // e.g. 'data.choices[0].text'
+}
 
 export interface AppSettings {
   aiModel: string; // e.g. 'gemini-2.5-flash'
   customApiKey?: string; // Optional user override
   dataSourceMode: DataSourceMode; // Preference for fetching data
-  customApiEndpoint?: string; // For 'custom_api' mode
+  
+  // Custom API Advanced Config
+  customApiConfig?: CustomApiConfig;
+  
+  // Visual Theme
+  theme: Theme;
 }
 
 export interface BackupData {

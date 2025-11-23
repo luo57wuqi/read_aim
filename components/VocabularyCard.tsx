@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { WordCardData } from '../types';
+import { compressImage } from '../utils/imageHelpers';
 import { SparklesIcon, AudioIcon, LinkIcon, CheckCircleIcon, PencilIcon, XMarkIcon, BrainIcon, EyeIcon, PhotoIcon, ArrowLeftIcon } from './Icons';
 
 interface VocabularyCardProps {
@@ -32,6 +34,7 @@ export const VocabularyCard: React.FC<VocabularyCardProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<WordCardData>(data);
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync editData when prop data changes (unless we are currently editing)
@@ -61,19 +64,24 @@ export const VocabularyCard: React.FC<VocabularyCardProps> = ({
      }));
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              const base64String = reader.result as string;
+          setIsCompressing(true);
+          try {
+              // Compress image before setting state to save memory
+              const base64String = await compressImage(file);
               setEditData(prev => ({
                   ...prev,
                   custom_image_base64: base64String,
                   custom_image_url: undefined // Clear URL if upload is used
               }));
-          };
-          reader.readAsDataURL(file);
+          } catch (error) {
+              console.error("Image compression failed", error);
+              alert("Failed to process image.");
+          } finally {
+              setIsCompressing(false);
+          }
       }
   };
 
@@ -233,6 +241,7 @@ export const VocabularyCard: React.FC<VocabularyCardProps> = ({
                     <EyeIcon className="w-3 h-3 text-slate-400" />
                     <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">图 (Visual)</h3>
                 </div>
+                {isCompressing && <span className="text-[10px] text-indigo-500 animate-pulse">Compressing...</span>}
             </div>
              
              {/* Text Description */}
@@ -263,10 +272,11 @@ export const VocabularyCard: React.FC<VocabularyCardProps> = ({
                      <div className="flex gap-2">
                         <button 
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex-1 flex items-center justify-center gap-2 bg-white border border-slate-300 py-1.5 rounded text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            disabled={isCompressing}
+                            className="flex-1 flex items-center justify-center gap-2 bg-white border border-slate-300 py-1.5 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                         >
                             <PhotoIcon className="w-3 h-3" />
-                            Upload Image
+                            {isCompressing ? 'Processing...' : 'Upload Image'}
                         </button>
                         <input 
                             ref={fileInputRef}

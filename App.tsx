@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
+import { fetchFromCustomApi } from './services/customApiService';
 import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData } from './types';
 import { Sidebar } from './components/Sidebar';
 import { VocabularyCard } from './components/VocabularyCard';
@@ -14,7 +16,8 @@ const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in s
 
 const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-2.5-flash',
-    dataSourceMode: 'ai'
+    dataSourceMode: 'ai',
+    theme: 'light'
 };
 
 function App() {
@@ -83,7 +86,7 @@ function App() {
     if (stats) setWordStats(JSON.parse(stats));
 
     const savedSettings = localStorage.getItem('english_reader_settings');
-    if (savedSettings) setSettings(JSON.parse(savedSettings));
+    if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
 
     const savedArticles = localStorage.getItem('english_reader_articles');
     if (savedArticles) {
@@ -121,9 +124,63 @@ function App() {
 
   // --- Derived State ---
   const activeArticle = articles.find(a => a.id === activeArticleId);
-  // Get the top card (current) and the one before it (previous)
   const topCard = wordCardStack.length > 0 ? wordCardStack[wordCardStack.length - 1] : null;
   const previousCard = wordCardStack.length > 1 ? wordCardStack[wordCardStack.length - 2] : null;
+
+  // --- Theme Engine ---
+  // Returns a configuration object for the current theme with hierarchy layers
+  const getThemePalette = () => {
+      switch(settings.theme) {
+          case 'dark': return {
+              appBg: 'bg-slate-950',
+              text: 'text-slate-200',
+              textMuted: 'text-slate-400',
+              headerBg: 'bg-slate-900/80 border-slate-800',
+              paperBg: 'bg-slate-900 border-slate-800 shadow-2xl shadow-black/50',
+              accent: 'text-indigo-400',
+              highlight: 'bg-indigo-500/20 text-indigo-200'
+          };
+          case 'sepia': return {
+              appBg: 'bg-[#f4ecd8]',
+              text: 'text-[#433422]',
+              textMuted: 'text-[#8a765d]',
+              headerBg: 'bg-[#e8dec0]/90 border-[#d6cbb1]',
+              paperBg: 'bg-[#fdf6e3] border-[#eee8d5] shadow-xl shadow-[#433422]/5',
+              accent: 'text-[#b58900]',
+              highlight: 'bg-[#b58900]/10 text-[#5b4636]'
+          };
+          case 'forest': return {
+              appBg: 'bg-[#051a14]',
+              text: 'text-[#e2e8f0]',
+              textMuted: 'text-[#94a3b8]',
+              headerBg: 'bg-[#0a2f26]/90 border-[#134e3f]',
+              paperBg: 'bg-[#0a2f26] border-[#134e3f] shadow-2xl shadow-black/50',
+              accent: 'text-[#34d399]',
+              highlight: 'bg-[#059669]/20 text-[#d1fae5]'
+          };
+          case 'amethyst': return {
+              appBg: 'bg-[#1e1b2e]',
+              text: 'text-[#e9d5ff]',
+              textMuted: 'text-[#a78bfa]',
+              headerBg: 'bg-[#2e1065]/50 border-[#4c1d95]',
+              paperBg: 'bg-[#2e1065]/40 border-[#4c1d95] shadow-2xl shadow-[#000]/40',
+              accent: 'text-[#d8b4fe]',
+              highlight: 'bg-[#7c3aed]/20 text-[#f3e8ff]'
+          };
+          case 'light': 
+          default: return {
+              appBg: 'bg-slate-50',
+              text: 'text-slate-800',
+              textMuted: 'text-slate-500',
+              headerBg: 'bg-white/80 border-slate-200',
+              paperBg: 'bg-white border-slate-200 shadow-xl shadow-slate-200/50',
+              accent: 'text-indigo-600',
+              highlight: 'bg-indigo-50 text-indigo-800'
+          };
+      }
+  };
+  
+  const theme = getThemePalette();
 
   // --- Effects ---
 
@@ -156,8 +213,8 @@ function App() {
               const el = sentenceRefs.current.get(highlightSentenceIndex);
               if (el) {
                   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  el.classList.add('bg-yellow-100');
-                  setTimeout(() => el.classList.remove('bg-yellow-100'), 2000);
+                  el.classList.add('bg-yellow-200/50'); // Softer highlight for dark mode
+                  setTimeout(() => el.classList.remove('bg-yellow-200/50'), 2000);
               }
               setHighlightSentenceIndex(null);
           }, 300);
@@ -185,18 +242,14 @@ function App() {
       setToast("Data restored successfully!");
   };
 
-  // New function to merge vocabulary without overwriting other data
   const handleMergeVocabulary = (newItems: SavedItem[]) => {
       let addedCount = 0;
       setSavedItems(prev => {
-          // Create a map of existing items by their original word (lowercase) for checking duplicates
           const currentMap = new Map(prev.map(i => [i.original.toLowerCase(), i]));
           const merged = [...prev];
           
           newItems.forEach(item => {
-              // Only merge words that don't exist
               if (item.type === 'word' && !currentMap.has(item.original.toLowerCase())) {
-                  // Ensure ID is unique
                   const newItem = { ...item, id: Date.now().toString() + Math.random().toString().slice(2,5) };
                   merged.push(newItem);
                   currentMap.set(newItem.original.toLowerCase(), newItem);
@@ -212,7 +265,6 @@ function App() {
     const nextState = !showTranslation;
     setShowTranslation(nextState);
 
-    // If enabling translation and sentences are missing translations, fetch them
     if (nextState && activeArticle) {
         const needsTranslation = activeArticle.sentences.some(s => !s.translation);
         if (needsTranslation && !isTranslatingArticle) {
@@ -220,12 +272,10 @@ function App() {
             setToast("Translating article...");
             
             try {
-                // Prepare batches (e.g. 20 sentences at a time to respect token limits)
                 const BATCH_SIZE = 20;
                 const sentences = [...activeArticle.sentences];
                 const newSentences = [...sentences];
 
-                // Find chunks that need translation
                 for (let i = 0; i < sentences.length; i += BATCH_SIZE) {
                     const chunk = sentences.slice(i, i + BATCH_SIZE);
                     const chunkIndices = chunk.map((s, idx) => ({ s, absIdx: i + idx })).filter(item => !item.s.translation);
@@ -234,7 +284,6 @@ function App() {
                         const textsToTranslate = chunkIndices.map(item => item.s.text);
                         const translations = await translateBatch(textsToTranslate, settings);
                         
-                        // Apply back to newSentences
                         chunkIndices.forEach((item, idx) => {
                            if (translations[idx]) {
                                newSentences[item.absIdx] = {
@@ -246,7 +295,6 @@ function App() {
                     }
                 }
 
-                // Update Article
                 const updatedArticle = { ...activeArticle, sentences: newSentences };
                 setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
                 setToast("Translation complete!");
@@ -315,23 +363,21 @@ function App() {
     setSelectionScope(scope);
     
     setActiveTranslation(null);
-    setWordCardStack([]); // Reset stack on new selection from text
+    setWordCardStack([]);
     setError(null);
   };
 
-  // Helper to fetch data either from Local or AI
+  // Helper to fetch data either from Local, AI, or Custom API
   const fetchCardData = async (word: string, context?: string): Promise<WordCardData> => {
       console.log("Fetching card data for:", word);
 
-      // 1. Check Local "SavedItems" (treated as independent dictionary)
-      // Normalize comparison to be safe
+      // 1. Check Local "SavedItems"
       const cachedItem = savedItems.find(i => 
           i.type === 'word' && i.original.trim().toLowerCase() === word.trim().toLowerCase()
       );
       
       if (cachedItem && cachedItem.cardData) {
           console.log("Found local cache:", cachedItem.original);
-          // Return a copy to avoid mutation issues if edited
           return { ...cachedItem.cardData };
       }
 
@@ -340,16 +386,13 @@ function App() {
           throw new Error(`"${word}" not found in collection. Switch to AI mode to generate.`);
       }
 
-      // 3. Custom API Mode
-      if (settings.dataSourceMode === 'custom_api' && settings.customApiEndpoint) {
+      // 3. Custom API Mode (New Logic)
+      if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig?.url) {
           try {
-              const response = await fetch(`${settings.customApiEndpoint}${encodeURIComponent(word)}`);
-              if (!response.ok) throw new Error("Custom API Error");
-              const json = await response.json();
-              return json as WordCardData;
-          } catch (e) {
+              return await fetchFromCustomApi(word, settings.customApiConfig);
+          } catch (e: any) {
               console.error(e);
-              throw new Error("Failed to fetch from custom API.");
+              throw new Error(`Custom API Error: ${e.message}`);
           }
       }
 
@@ -372,9 +415,8 @@ function App() {
     try {
       if (selectionScope === 'word') {
         const cardData = await fetchCardData(selectedText, contextSentence);
-        setWordCardStack([cardData]); // Start new stack
+        setWordCardStack([cardData]); 
       } else {
-        // CACHING: Check if this sentence already has a translation
         const existingTranslation = activeArticle.sentences[selectedSentenceIndex]?.translation;
         
         if (existingTranslation) {
@@ -406,11 +448,10 @@ function App() {
 
   const handleViewCard = async (wordOrItem: string | SavedItem) => {
      setIsLoading(true);
-     setWordCardStack([]); // Clear stack
-     setSelectionRect(null); // Hide floating button
+     setWordCardStack([]); 
+     setSelectionRect(null); 
      setActiveTranslation(null);
      
-     // Close sidebar/stats to show card if on mobile
      if (window.innerWidth < 768) {
          setIsSidebarOpen(false);
          if (viewMode === ViewMode.STATS) setViewMode(ViewMode.READ);
@@ -420,12 +461,9 @@ function App() {
          let cardData: WordCardData;
          
          if (typeof wordOrItem === 'object' && wordOrItem.cardData) {
-             // Direct item passed
              cardData = wordOrItem.cardData;
          } else {
-             // String passed
              const word = typeof wordOrItem === 'string' ? wordOrItem : (wordOrItem as SavedItem).original;
-             // Ensure we check cache even if viewing from string
              cardData = await fetchCardData(word);
          }
          
@@ -495,17 +533,15 @@ function App() {
       }
   };
 
-  // Rendering Helpers
   const renderSentence = (sentence: Sentence) => {
       const sentenceContent = (
           <span 
             key={sentence.index} 
             ref={el => { if (el) sentenceRefs.current.set(sentence.index, el); }}
-            className={`transition-colors duration-1000 rounded px-1 ${highlightSentenceIndex === sentence.index ? 'bg-yellow-100' : ''} ${isInteractiveMode ? 'cursor-pointer' : ''}`}
+            className={`transition-colors duration-1000 rounded px-1 ${highlightSentenceIndex === sentence.index ? 'bg-yellow-200 text-slate-900' : ''} ${isInteractiveMode ? 'cursor-pointer' : ''}`}
             id={`sentence-${sentence.index}`}
           >
              {isInteractiveMode && selectionScope === 'word' ? (
-                 // Word Tokenization Mode
                  sentence.text.split(/([a-zA-Z0-9_'-]+)/g).map((token, tIdx) => {
                       const isWord = /^[a-zA-Z0-9_'-]+$/.test(token);
                       if (isWord) {
@@ -513,7 +549,11 @@ function App() {
                               <span
                                 key={tIdx}
                                 onClick={(e) => handleInteractiveClick(e, token, sentence, 'word')}
-                                className={`hover:text-indigo-600 hover:bg-indigo-50 rounded px-0.5 ${selectedText === token && !activeTranslation ? 'bg-indigo-200' : ''}`}
+                                className={`rounded px-0.5 transition-colors 
+                                    ${selectedText === token && !activeTranslation 
+                                        ? 'bg-indigo-500 text-white shadow-sm' 
+                                        : `hover:opacity-80 hover:underline decoration-2 decoration-indigo-400/50`
+                                    }`}
                               >
                                   {token}
                               </span>
@@ -522,10 +562,9 @@ function App() {
                       return <span key={tIdx}>{token}</span>;
                   })
              ) : (
-                 // Sentence Mode
                  <span
                     onClick={(e) => handleInteractiveClick(e, sentence.text, sentence, 'sentence')}
-                    className={`hover:bg-indigo-50 ${selectedText === sentence.text.trim() && !topCard ? 'bg-indigo-100 text-indigo-900' : ''}`}
+                    className={`hover:bg-indigo-500/10 ${selectedText === sentence.text.trim() && !topCard ? 'bg-indigo-500 text-white shadow-sm px-1' : ''}`}
                  >
                      {sentence.text}
                  </span>
@@ -537,7 +576,7 @@ function App() {
           <div className="mb-1 inline" key={sentence.index}>
               {sentenceContent}
               {showTranslation && sentence.translation && (
-                  <div className="block mt-1 mb-3 text-slate-500 text-sm font-sans border-l-2 border-slate-200 pl-2">
+                  <div className={`block mt-2 mb-4 text-sm font-sans border-l-2 pl-3 py-1 ${theme.textMuted} border-indigo-500/30`}>
                       {sentence.translation}
                   </div>
               )}
@@ -547,12 +586,12 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+    <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-500 ${theme.appBg} ${theme.text}`}>
       {/* Toast */}
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] animate-fade-in-down">
-            <div className="bg-slate-800 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
-                <CheckCircleIcon className="w-4 h-4 text-emerald-400" />
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-fade-in-down pointer-events-none">
+            <div className="bg-slate-800/90 backdrop-blur-md text-white px-5 py-3 rounded-full shadow-2xl border border-white/10 flex items-center gap-3 text-sm font-medium">
+                <CheckCircleIcon className="w-5 h-5 text-emerald-400" />
                 {toast}
             </div>
         </div>
@@ -562,23 +601,18 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 relative">
         
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 shadow-sm z-10 gap-2 sm:gap-4">
+        <header className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors backdrop-blur-sm border-b ${theme.headerBg}`}>
           <div 
             className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
             onClick={() => setViewMode(ViewMode.LIBRARY)}
           >
-            <div className="bg-indigo-600 p-2 rounded-lg hidden sm:block shrink-0">
+            <div className="bg-indigo-600 p-2 rounded-lg hidden sm:block shrink-0 shadow-lg shadow-indigo-600/20">
                 <BookOpenIcon className="w-5 h-5 text-white" />
             </div>
             <div className="overflow-hidden">
-                <h1 className="font-bold text-lg text-slate-800 truncate">
+                <h1 className="font-bold text-lg truncate tracking-tight">
                     {viewMode === ViewMode.LIBRARY ? 'Library' : (viewMode === ViewMode.STATS ? 'Analytics' : (activeArticle?.title || 'Reader'))}
                 </h1>
-                {viewMode === ViewMode.READ && activeArticle && (
-                    <p className="text-xs text-slate-400 truncate flex items-center gap-1">
-                        Click for Library
-                    </p>
-                )}
             </div>
           </div>
           
@@ -587,7 +621,7 @@ function App() {
                 <>
                     <button 
                         onClick={toggleTranslation}
-                        className={`p-2 rounded-md transition-colors flex items-center gap-1 ${showTranslation ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:bg-slate-100'}`}
+                        className={`p-2 rounded-md transition-all flex items-center gap-1 ${showTranslation ? theme.highlight : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
                         title={showTranslation ? "Hide Translation" : "Show Chinese Translation"}
                     >
                         <LanguageIcon className="w-5 h-5" />
@@ -595,18 +629,18 @@ function App() {
                         {isTranslatingArticle && <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />}
                     </button>
 
-                    <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block"></div>
+                    <div className="w-px h-6 bg-current opacity-10 mx-1 hidden sm:block"></div>
 
-                    <div className="flex bg-slate-100 p-1 rounded-lg mr-2 hidden md:flex">
+                    <div className="flex bg-black/5 p-1 rounded-lg mr-2 hidden md:flex">
                         <button 
                             onClick={() => setSelectionScope('word')}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${selectionScope === 'word' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${selectionScope === 'word' ? 'bg-white text-indigo-700 shadow-sm' : 'text-inherit opacity-60 hover:opacity-100'}`}
                         >
                             Word
                         </button>
                         <button 
                             onClick={() => setSelectionScope('sentence')}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${selectionScope === 'sentence' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${selectionScope === 'sentence' ? 'bg-white text-indigo-700 shadow-sm' : 'text-inherit opacity-60 hover:opacity-100'}`}
                         >
                             Sentence
                         </button>
@@ -614,7 +648,7 @@ function App() {
 
                     <button 
                     onClick={() => setIsInteractiveMode(!isInteractiveMode)}
-                    className={`p-2 rounded-md transition-colors ${isInteractiveMode ? 'bg-emerald-100 text-emerald-700' : 'text-slate-400 hover:bg-slate-100'}`}
+                    className={`p-2 rounded-md transition-all ${isInteractiveMode ? 'bg-emerald-500/10 text-emerald-600' : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
                     title="Toggle Interactive Mode"
                     >
                         <TouchIcon className="w-5 h-5" active={isInteractiveMode} />
@@ -624,7 +658,7 @@ function App() {
 
             <button
                 onClick={() => setViewMode(viewMode === ViewMode.STATS ? ViewMode.READ : ViewMode.STATS)}
-                className={`p-2 rounded-md transition-colors ${viewMode === ViewMode.STATS ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:bg-slate-100'}`}
+                className={`p-2 rounded-md transition-all ${viewMode === ViewMode.STATS ? theme.highlight : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
                 title="View Stats & History"
             >
                 <ChartBarIcon className="w-5 h-5" />
@@ -632,7 +666,7 @@ function App() {
             
             <button 
                 onClick={() => setIsSettingsOpen(true)}
-                className="p-2 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                className="p-2 rounded-md hover:bg-black/5 opacity-60 hover:opacity-100 transition-colors"
                 title="Settings"
             >
                 <CogIcon className="w-5 h-5" />
@@ -640,7 +674,7 @@ function App() {
 
             <button 
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className={`p-2 rounded-md hover:bg-slate-100 ${isSidebarOpen ? 'text-indigo-600' : 'text-slate-400'}`}
+                className={`p-2 rounded-md hover:bg-black/5 transition-all ${isSidebarOpen ? theme.accent : 'opacity-60'}`}
             >
                 <BookmarkIcon className="w-5 h-5" solid={isSidebarOpen} />
             </button>
@@ -671,7 +705,7 @@ function App() {
         ) : (
             <>
                 {/* READ MODE */}
-                <div className="w-full h-1 bg-slate-200">
+                <div className="w-full h-1 bg-black/5">
                     <div 
                         className="h-full bg-indigo-500 transition-all duration-150 ease-out"
                         style={{ width: `${readingProgress}%` }}
@@ -688,14 +722,18 @@ function App() {
                         setWordCardStack([]);
                     }}
                 >
-                    <div className="max-w-3xl mx-auto bg-white shadow-sm border border-slate-200 min-h-[60vh] p-6 sm:p-10 rounded-xl relative">
+                    <div className={`max-w-3xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-300 
+                        ${theme.paperBg} ${theme.text}
+                        `}
+                    >
                         {!activeArticle ? (
-                            <div className="text-center py-20 text-slate-400">
+                            <div className="text-center py-20 opacity-50">
                                 <p>No article selected.</p>
-                                <button onClick={() => setViewMode(ViewMode.LIBRARY)} className="text-indigo-600 hover:underline">Go to Library</button>
+                                <button onClick={() => setViewMode(ViewMode.LIBRARY)} className="text-indigo-500 hover:underline">Go to Library</button>
                             </div>
                         ) : (
-                            <div className={`reader-text text-lg sm:text-xl text-slate-800 leading-loose`}>
+                            <div className={`reader-text text-lg sm:text-xl leading-loose`}>
+                                <h2 className="text-3xl font-bold mb-8 font-serif">{activeArticle.title}</h2>
                                 {activeArticle.sentences.map((sentence, idx) => (
                                     <React.Fragment key={sentence.index}>
                                         {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
@@ -705,7 +743,6 @@ function App() {
                             </div>
                         )}
                         
-                        {/* Loading Indicator for Batch Translation */}
                         {isTranslatingArticle && (
                             <div className="absolute bottom-4 right-4 bg-white shadow-lg border border-indigo-100 px-4 py-2 rounded-full flex items-center gap-2 text-sm text-indigo-600 animate-bounce">
                                 <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
@@ -720,14 +757,14 @@ function App() {
                     <div 
                         className="absolute z-40 animate-fade-in-up"
                         style={{ 
-                            top: selectionRect.bottom + (isInteractiveMode ? 15 : 10), 
+                            top: selectionRect.bottom + (isInteractiveMode ? 20 : 15), 
                             left: selectionRect.left + selectionRect.width / 2,
                             transform: 'translateX(-50%)'
                         }}
                     >
                         <button 
                             onClick={handleTranslate}
-                            className="bg-slate-900 text-white px-5 py-2.5 rounded-full shadow-xl hover:bg-slate-800 flex items-center gap-2 text-sm font-medium transition-transform active:scale-95 whitespace-nowrap border border-slate-700"
+                            className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl hover:bg-black hover:scale-105 flex items-center gap-3 text-sm font-bold transition-all whitespace-nowrap border border-slate-700 ring-2 ring-white/20"
                         >
                             <SparklesIcon className="w-4 h-4 text-yellow-400" />
                             {isLoading ? 'Thinking...' : (selectionScope === 'word' ? 'Explain Word' : 'Translate Sentence')}
@@ -735,35 +772,24 @@ function App() {
                     </div>
                 )}
 
-                {/* Result Sheets - DUAL STACK LOGIC */}
-                
-                {/* 1. Previous Card (Side-by-side) */}
+                {/* Result Sheets */}
                 {previousCard && (
                      <DraggableSheet
                          key={`prev-${previousCard.word}`}
                          title={`Previous: ${previousCard.word}`}
                          onClose={() => setWordCardStack(prev => prev.slice(0, -1))} 
-                         // Offset logic:
-                         // Desktop: Shift 320px left to sit next to the main card
-                         // Mobile: Shift 20px up to peek behind
                          initialOffset={window.innerWidth >= 768 ? { x: -320, y: 0 } : { x: 0, y: -40 }}
                          className="opacity-95 z-40 border-slate-300 shadow-xl"
                      >
                          <VocabularyCard 
                             data={previousCard} 
                             isStacked={true}
-                            onGoBack={() => {
-                                // "Back" on the previous card doesn't make much sense in this stack view,
-                                // but we could pop it to remove it.
-                                setWordCardStack(prev => prev.slice(0, -2).concat(prev.slice(-1)));
-                            }}
-                            // Allow clicking "Back" in UI to just close this one
+                            onGoBack={() => setWordCardStack(prev => prev.slice(0, -2).concat(prev.slice(-1)))}
                             canGoBack={false} 
                          />
                      </DraggableSheet>
                 )}
 
-                {/* 2. Current Card (Main) */}
                 {(topCard || activeTranslation || error) && (
                     <DraggableSheet
                         key={topCard?.word || 'active'}
@@ -802,20 +828,15 @@ function App() {
                                 onSave={handleSave}
                                 onUpdate={(newData) => {
                                     setWordCardStack(prev => [...prev.slice(0, -1), newData]);
-
-                                    // Persist changes to SavedItems if this word is already saved
                                     setSavedItems(prevItems => {
-                                        // Check if this word exists in our collection
                                         const exists = prevItems.some(i => i.type === 'word' && i.original.toLowerCase() === newData.word.toLowerCase());
                                         if (!exists) return prevItems;
-                                        
-                                        // Update the saved record
                                         return prevItems.map(item => {
                                             if (item.type === 'word' && item.original.toLowerCase() === newData.word.toLowerCase()) {
                                                 return {
                                                     ...item,
                                                     translation: newData.translation,
-                                                    cardData: newData // This includes the new image URL or base64
+                                                    cardData: newData
                                                 };
                                             }
                                             return item;
@@ -823,14 +844,11 @@ function App() {
                                     });
                                 }}
                                 isSaved={savedItems.some(i => i.original.toLowerCase() === topCard.word.toLowerCase())}
-                                
                                 canGoBack={wordCardStack.length > 1}
                                 onGoBack={() => setWordCardStack(prev => prev.slice(0, -1))}
-                                
                                 onExploreRelated={async (word) => {
                                     setLoadingNextCard(true);
                                     try {
-                                        // Use fetchCardData instead of generate directly to use cache
                                         const card = await fetchCardData(word);
                                         setWordCardStack(prev => [...prev, card]);
                                         trackWordUsage(word, activeArticle?.id || 'unknown', selectedSentenceIndex);
@@ -855,12 +873,7 @@ function App() {
             settings={settings}
             onClose={() => setIsSettingsOpen(false)}
             onSaveSettings={setSettings}
-            data={{
-                articles,
-                savedItems,
-                historyRecords,
-                wordStats
-            }}
+            data={{ articles, savedItems, historyRecords, wordStats }}
             onImportData={handleImportData}
             onMergeVocabulary={handleMergeVocabulary}
           />
@@ -868,26 +881,28 @@ function App() {
 
       {/* Sidebar */}
       {isSidebarOpen && (
-        <div className="hidden md:block w-80 shrink-0 h-full border-l border-slate-200 bg-white">
+        <div className="hidden md:block w-80 shrink-0 h-full border-l border-white/10 relative z-20 shadow-2xl">
             <Sidebar 
                 savedItems={savedItems} 
                 onRemoveItem={removeSavedItem} 
                 onSelectSavedItem={(item) => handleJumpToContext(item.sourceArticleId, item.sourceSentenceIndex)}
                 onViewCard={handleViewCard}
+                theme={settings.theme}
             />
         </div>
       )}
       
       {/* Mobile Sidebar */}
       {isSidebarOpen && (
-        <div className="md:hidden fixed inset-0 z-[60] bg-black/50 flex justify-end">
-           <div className="w-80 h-full bg-white shadow-2xl relative animate-slide-in-right">
-              <button onClick={() => setIsSidebarOpen(false)} className="absolute top-2 right-2 p-2 text-slate-400">✕</button>
+        <div className="md:hidden fixed inset-0 z-[60] bg-black/50 flex justify-end backdrop-blur-sm">
+           <div className="w-80 h-full shadow-2xl relative animate-slide-in-right">
+              <button onClick={() => setIsSidebarOpen(false)} className="absolute top-2 right-2 p-2 text-slate-400 z-10">✕</button>
               <Sidebar 
                 savedItems={savedItems} 
                 onRemoveItem={removeSavedItem} 
                 onSelectSavedItem={(item) => handleJumpToContext(item.sourceArticleId, item.sourceSentenceIndex)}
                 onViewCard={handleViewCard}
+                theme={settings.theme}
             />
            </div>
         </div>
