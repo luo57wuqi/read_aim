@@ -779,6 +779,25 @@ function App() {
                                 onSave={handleSave}
                                 onUpdate={(newData) => {
                                     setWordCardStack(prev => [...prev.slice(0, -1), newData]);
+
+                                    // Persist changes to SavedItems if this word is already saved
+                                    setSavedItems(prevItems => {
+                                        // Check if this word exists in our collection
+                                        const exists = prevItems.some(i => i.type === 'word' && i.original.toLowerCase() === newData.word.toLowerCase());
+                                        if (!exists) return prevItems;
+                                        
+                                        // Update the saved record
+                                        return prevItems.map(item => {
+                                            if (item.type === 'word' && item.original.toLowerCase() === newData.word.toLowerCase()) {
+                                                return {
+                                                    ...item,
+                                                    translation: newData.translation,
+                                                    cardData: newData // This includes the new image URL or base64
+                                                };
+                                            }
+                                            return item;
+                                        });
+                                    });
                                 }}
                                 isSaved={savedItems.some(i => i.original.toLowerCase() === topCard.word.toLowerCase())}
                                 
