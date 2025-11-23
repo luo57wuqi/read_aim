@@ -1,0 +1,106 @@
+
+export interface WordCardData {
+  word: string;
+  phonetic: string;
+  translation: string;
+  // "有记录意思"
+  recorded_meanings: string; 
+  // "有意思发现[用起来]" (Mnemonic Analysis)
+  mnemonic_analysis: string;
+  // "核心含义内核" (Core Logic)
+  core_logic: string;
+  // "图" (Visual Prompt description)
+  visual_image_prompt: string;
+  
+  // Custom User Image (URL or Base64)
+  custom_image_url?: string;
+  custom_image_base64?: string; // For uploaded images stored in localStorage
+  
+  // Standard fields for example
+  scenario_sentence_en: string;
+  scenario_sentence_cn: string;
+  
+  related_word_suggestion?: {
+    word: string;
+    reason: string;
+  };
+}
+
+export interface Sentence {
+  index: number;
+  text: string;
+  translation?: string;
+  isParagraphStart?: boolean; // Visual helper
+}
+
+export interface Article {
+  id: string;
+  title: string;
+  sentences: Sentence[];
+  createdAt: number;
+  lastReadAt: number;
+}
+
+export interface SavedItem {
+  id: string;
+  original: string;
+  translation: string;
+  type: 'word' | 'sentence';
+  cardData?: WordCardData; // Only for words
+  timestamp: number;
+  // Source Metadata
+  sourceArticleId: string;
+  sourceArticleTitle: string;
+  sourceContextSentence: string;
+  sourceSentenceIndex: number; 
+}
+
+export interface HistoryRecord {
+  id: string;
+  action: 'ADD' | 'REMOVE' | 'LOOKUP'; // Added LOOKUP for tracking frequency without saving
+  original: string;
+  type: 'word' | 'sentence';
+  timestamp: number;
+  // Source Metadata
+  sourceArticleId: string;
+  sourceArticleTitle: string;
+  sourceContextSentence: string;
+  sourceSentenceIndex: number;
+}
+
+export interface WordUsageData {
+  word: string;
+  frequency: number;
+  occurrences: {
+    articleId: string;
+    sentenceIndex: number;
+    timestamp: number;
+  }[];
+}
+
+export type WordStatsMap = Record<string, WordUsageData>;
+
+export type DataSourceMode = 'ai' | 'local_only' | 'custom_api';
+
+export interface AppSettings {
+  aiModel: string; // e.g. 'gemini-2.5-flash'
+  customApiKey?: string; // Optional user override
+  dataSourceMode: DataSourceMode; // Preference for fetching data
+  customApiEndpoint?: string; // For 'custom_api' mode
+}
+
+export interface BackupData {
+  version: number;
+  timestamp: number;
+  articles: Article[];
+  savedItems: SavedItem[];
+  historyRecords: HistoryRecord[];
+  wordStats: WordStatsMap;
+  settings: AppSettings;
+}
+
+export enum ViewMode {
+  LIBRARY = 'LIBRARY',
+  READ = 'READ',
+  STATS = 'STATS',
+}

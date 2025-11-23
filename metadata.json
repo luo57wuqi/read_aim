@@ -1,0 +1,5 @@
+{
+  "name": "Smart English Reader",
+  "description": "An intelligent English reading assistant powered by Gemini. Features context-aware translation, vocabulary cards with memory aids, and split-view reading mode.",
+  "requestFramePermissions": []
+}
