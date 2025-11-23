@@ -185,6 +185,29 @@ function App() {
       setToast("Data restored successfully!");
   };
 
+  // New function to merge vocabulary without overwriting other data
+  const handleMergeVocabulary = (newItems: SavedItem[]) => {
+      let addedCount = 0;
+      setSavedItems(prev => {
+          // Create a map of existing items by their original word (lowercase) for checking duplicates
+          const currentMap = new Map(prev.map(i => [i.original.toLowerCase(), i]));
+          const merged = [...prev];
+          
+          newItems.forEach(item => {
+              // Only merge words that don't exist
+              if (item.type === 'word' && !currentMap.has(item.original.toLowerCase())) {
+                  // Ensure ID is unique
+                  const newItem = { ...item, id: Date.now().toString() + Math.random().toString().slice(2,5) };
+                  merged.push(newItem);
+                  currentMap.set(newItem.original.toLowerCase(), newItem);
+                  addedCount++;
+              }
+          });
+          return merged;
+      });
+      setToast(`Successfully imported ${addedCount} new words!`);
+  };
+
   const toggleTranslation = async () => {
     const nextState = !showTranslation;
     setShowTranslation(nextState);
@@ -839,6 +862,7 @@ function App() {
                 wordStats
             }}
             onImportData={handleImportData}
+            onMergeVocabulary={handleMergeVocabulary}
           />
       )}
 

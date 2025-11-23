@@ -1,115 +1,102 @@
 # Smart English Reader (AI-Powered) / 智能英语阅读助手
 
-An intelligent, context-aware English reading assistant. It transforms static text into an interactive learning experience using Google's Gemini AI and "Associative Memory" techniques.
-
 一个智能的、具备上下文感知的英语阅读助手。利用 Google Gemini AI 和“联想记忆法”技术，将静态文本转化为交互式的学习体验。
 
 ---
 
-## 🏗 Architecture & Logic / 架构与逻辑关系
+## 🏗 架构与逻辑关系 (Architecture & Logic)
 
-This project is a **Client-Side Single Page Application (SPA)** built with React. It follows a **Centralized State Management** pattern ("Local-First").
+本项目是一个基于 React 的**客户端单页应用 (SPA)**，没有后端服务器。它采用**集中式状态管理**模式（“本地优先”策略）。所有的逻辑核心都在 `App.tsx` 中。
 
-本项目是一个基于 React 的**客户端单页应用 (SPA)**。它采用**集中式状态管理**模式（“本地优先”策略）。
+### 1. 核心架构设计 (Core Architecture)
 
-### 1. Core Architecture / 核心架构
-*   **Controller (`App.tsx`)**: 
-    *   Acts as the "Brain" of the application. It holds all state (`articles`, `savedItems`, `history`, `viewMode`).
-    *   Only `App.tsx` interacts with `localStorage`. Child components trigger updates via callbacks.
-    *   **控制器**: 应用的“大脑”。持有所有状态。只有它负责与本地存储交互，子组件通过回调函数触发更新。
-*   **Service Layer (`services/geminiService.ts`)**: 
-    *   Pure functions that handle API communication. It does not hold state.
-    *   **服务层**: 处理 API 通信的纯函数，不保存状态。
-*   **UI Components**: 
-    *   Purely presentational (mostly). They receive data via props and emit events.
-    *   **UI 组件**: 主要负责展示，通过 props 接收数据并发出事件。
+*   **控制器 (Controller) - `App.tsx`**: 
+    *   **角色**: 应用的“大脑”。
+    *   **职责**: 
+        1.  持有所有核心状态：`articles`（文章库）、`savedItems`（单词库）、`viewMode`（视图模式）、`history`（历史记录）。
+        2.  负责所有的数据持久化（读写 `localStorage`）。
+        3.  分发回调函数给子组件（如 `onSave`, `onUpdate`）。
+*   **服务层 (Service Layer) - `services/geminiService.ts`**: 
+    *   **角色**: 无状态的工具人。
+    *   **职责**: 单纯负责处理 API 通信。它接收文本，构造 Prompt（提示词），调用 Gemini API，并返回格式化好的 JSON 数据。它不知道任何关于“当前文章”或“用户设置”的信息，完全依赖传入的参数。
+*   **UI 组件 (Pure Components)**: 
+    *   **角色**: 视图层。
+    *   **职责**: 如 `VocabularyCard` (单词卡) 或 `DraggableSheet` (悬浮窗)，它们只负责根据 `props` 渲染界面，并通过事件通知 `App.tsx` 进行数据变更。
 
-### 2. Data Flow: "The Lifecycle of a Word" / 数据流：单词的生命周期
+### 2. 数据流向：单词的“一生” (Data Flow)
 
-When a user interacts with a word, the following logic chain triggers:
+当用户在界面上点击一个单词时，数据是如何流转的？
 
-当用户与单词交互时，触发以下逻辑链：
+1.  **交互触发**: 用户在 `App.tsx` 的阅读区域点击单词。
+2.  **缓存优先策略 (Cache-First Strategy)**: 
+    *   `App.tsx` 此时不会立刻调用 AI。它会先去 `savedItems` (本地单词库) 里查找。
+    *   **如果存在**: 直接使用本地保存的数据（含用户编辑过的笔记和图片）。
+    *   **如果不存在**: 调用 `geminiService.generateWordCard` 向 Google Gemini 请求数据。
+3.  **渲染 (Rendering)**: 数据被放入 `wordCardStack` 状态数组中，触发 `DraggableSheet` 渲染出卡片。
+4.  **修改与同步 (Edit & Sync)**: 
+    *   用户在卡片上点击“编辑”，修改了助记图片。
+    *   `VocabularyCard` 调用 `onUpdate` 回调。
+    *   `App.tsx` 接收到新数据，**关键逻辑**：它会检查这个单词是否在 `savedItems` 中。如果是，它会立刻更新 `savedItems` 里的记录，并同步到 `localStorage`。这保证了即使你关闭卡片，下次打开时你的图片依然存在。
 
-1.  **Interaction (交互)**: User clicks a tokenized word in `App.tsx`.
-2.  **Check Cache (查缓存)**: 
-    *   `fetchCardData` first checks `savedItems` (Local Dictionary).
-    *   If found → Returns local data instantly (Offline ready).
-    *   If not found → Calls `geminiService` (AI Generation).
-3.  **Visualization (展示)**: Data is pushed to `wordCardStack` state, rendering a `DraggableSheet`.
-4.  **Modification (修改)**: 
-    *   User edits the card (e.g., adds an image).
-    *   `VocabularyCard` calls `onUpdate`.
-    *   **Crucial Step**: `App.tsx` detects if this word is already in `savedItems`. If yes, it updates the persistent storage immediately.
-5.  **Persistence (持久化)**: `useEffect` hooks in `App.tsx` automatically sync state changes to `localStorage`.
+### 3. 文件职责映射图 (File Responsibilities)
 
-### 3. File Responsibilities / 文件职责说明
-
-| File | Responsibility (CN) | Responsibility (EN) |
-| :--- | :--- | :--- |
-| `App.tsx` | **核心入口**。管理所有状态、路由逻辑、数据持久化和组件协调。 | **Core Entry**. Manages all state, routing logic, persistence, and orchestration. |
-| `services/geminiService.ts` | **AI 接口层**。处理 Prompt 工程、API 调用和 JSON 格式化。 | **AI Interface**. Handles Prompt Engineering, API calls, and JSON formatting. |
-| `types.ts` | **类型定义**。定义了 Article, WordCardData, SavedItem 等核心数据结构。 | **Type Definitions**. Defines core data structures like Article, WordCardData, etc. |
-| `components/VocabularyCard.tsx` | **单词卡片**。展示单词详情、处理编辑模式、图片上传逻辑。 | **Word Card**. Displays details, handles edit mode, and image upload logic. |
-| `components/DraggableSheet.tsx` | **悬浮窗容器**。处理拖拽逻辑、层级叠加 (z-index) 和定位。 | **Floating Container**. Handles dragging logic, stacking (z-index), and positioning. |
-| `components/ArticleLibrary.tsx` | **文章库**。管理文章列表、导入文本、分词处理。 | **Library**. Manages article list, text import, and tokenization. |
-| `components/StatsView.tsx` | **数据分析**。统计词频、历史记录、计算当前文章的单词覆盖率。 | **Analytics**. Tracks frequency, history, and calculates word coverage. |
-| `components/SettingsView.tsx` | **设置与备份**。管理 API Key、导出/导入 JSON 备份 (含图片优化逻辑)。 | **Settings**. Manages API Keys, JSON Backup/Restore (with image optimization). |
+| 文件路径 | 核心职责 |
+| :--- | :--- |
+| **`App.tsx`** | **核心入口**。逻辑中枢，状态容器。处理单词点击、数据保存、侧边栏开关、路由切换。 |
+| **`services/geminiService.ts`** | **AI 接口**。定义了 Prompt 模板和 JSON Schema。负责把自然语言转为结构化 JSON。 |
+| **`types.ts`** | **数据契约**。定义了所有核心数据结构 (`SavedItem`, `Article`)，确保全项目类型安全。 |
+| **`components/VocabularyCard.tsx`** | **业务组件**。展示单词详情。包含播放音频、编辑笔记、上传图片的 UI 逻辑。 |
+| **`components/DraggableSheet.tsx`** | **通用 UI**。实现了一个可拖拽、可叠加的模态框容器。 |
+| **`components/ArticleLibrary.tsx`** | **业务组件**。文章列表管理。处理文本粘贴、分词预处理 (`processTextToArticle`)。 |
+| **`components/SettingsView.tsx`** | **系统组件**。处理设置、**数据备份与恢复**（含全量备份和单词库独立导入）。 |
 
 ---
 
-## 🌟 Key Features / 核心功能
+## 🌟 核心功能特性
 
-### 1. AI-Driven Vocabulary Cards (AI 驱动的单词卡)
-Instead of simple definitions, the app generates detailed cards with:
-不仅是简单的定义，应用生成包含以下内容的详细卡片：
-- **Core Logic (核心含义内核)**: The abstract concept behind the word.
-- **Mnemonic Analysis (有意思发现)**: Roots, spelling tricks, or sound associations.
-- **Visual Prompts (图)**: Descriptions or user-uploaded images.
+### 1. 深度 AI 单词卡 (Deep Vocabulary Cards)
+不同于简单的字典定义，我们生成的是符合“联想记忆法”的深度卡片：
+- **核心含义内核**: 提炼单词最底层的抽象概念。
+- **有意思发现**: 词根词缀分析、谐音梗、拼写记忆点。
+- **视觉图**: AI 生成的画面描述，或用户上传的图片。
 
-### 2. Intelligent Data Strategy (智能数据策略)
-- **Local-First**: Always prioritizes your local database over AI requests to save tokens and work offline.
-  - **本地优先**: 总是优先使用本地数据库而非 AI 请求，以节省 Token 并支持离线。
-- **Smart Export**: When exporting backups, Base64 images are stripped (unless they are URLs) to keep files lightweight.
-  - **智能导出**: 备份时自动剥离 Base64 图片（保留 URL），保持文件轻量。
+### 2. 智能数据策略 (Smart Data Strategy)
+- **本地优先**: 极大地减少 API 调用消耗。已学过的单词直接从本地秒开，支持离线复习。
+- **双重备份机制**:
+  - **全量备份**: 导出所有文章、历史和单词。
+  - **单词库独立导出**: 只导出单词数据。方便你在切换文章、甚至重置应用后，依然保留你积累的词汇库。**导入时采用合并策略**，不会覆盖现有数据。
 
-### 3. Reading Interface (阅读界面)
-- **Interactive Tokenization**: Click any word to split sentences and analyze context.
-- **Stacking UI**: View "Current" and "Previous" cards side-by-side.
-- **Translation**: Batch translate paragraphs using Gemini.
+### 3. 阅读体验优化
+- **双卡片堆叠**: 支持同时查看“当前单词”和“上一个单词”，方便对比记忆。
+- **交互式分词**: 点击单词查词，点击句子查翻译。
+- **图片优化**: 导出 JSON 时，会自动剥离大型 Base64 图片（保留 URL），防止备份文件体积过大导致浏览器崩溃。
 
 ---
 
-## 🚀 Setup & Deployment / 安装与部署
+## 🚀 安装与运行
 
-### Prerequisites / 前置要求
+### 环境要求
 1.  **Node.js** (v16+)
-2.  **Google Gemini API Key**: Get one from [Google AI Studio](https://aistudiocdn.com/ai.google.dev).
+2.  **Google Gemini API Key**: 从 [Google AI Studio](https://aistudiocdn.com/ai.google.dev) 获取。
 
-### Installation / 安装步骤
+### 安装步骤
 
-1.  **Clone the repository / 克隆仓库**:
-    ```bash
-    git clone <repository-url>
-    cd smart-english-reader
-    ```
-
-2.  **Install Dependencies / 安装依赖**:
+1.  **安装依赖**:
     ```bash
     npm install
+    # 确保安装了最新的 SDK
     npm install @google/genai react react-dom
     ```
 
-3.  **Configuration / 配置**:
-    *   Create a `.env` file or enter your API Key in the App Settings UI.
-    *   创建 `.env` 文件，或者直接在应用设置界面输入 API Key。
+2.  **运行**:
+    ```bash
+    npm run dev
+    # 或
+    npx serve .
+    ```
 
-### Running Locally / 本地运行
-
-```bash
-npm run dev
-# OR / 或
-npx serve .
-```
+3.  **配置**:
+    打开网页右上角的设置图标，输入你的 Gemini API Key 即可开始使用。
 
 ---
 

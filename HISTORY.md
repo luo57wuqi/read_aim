@@ -1,34 +1,58 @@
-# Development History / 开发历史
+# 开发历史日志 (Development History)
 
-## Phase 1: Core Foundation & AI Integration
-**Goal**: Create a reader that uses Gemini to analyze words.
-1.  **Project Structure**: Set up React + TypeScript.
-2.  **Gemini Service**: Implemented `generateWordCard` with strict JSON Schema.
-3.  **Text Processing**: Utilities to split text into sentences and interactive tokens.
+本文档记录了 Smart English Reader 从零开始的迭代开发过程，详细归纳了每个阶段实现的功能和解决的问题。
 
-## Phase 2: User Experience & Interactivity
-**Goal**: Fluid reading experience.
-1.  **Draggable Sheets**: Floating modals so definitions don't block text.
-2.  **Sidebar**: Saved items collection.
-3.  **TTS**: Native browser text-to-speech.
+## 第一阶段：核心地基与 AI 对接 (Phase 1)
+**目标**: 构建一个能利用 Gemini 分析单词的基础阅读器。
 
-## Phase 3: Persistence & Library
-**Goal**: Make it a usable app.
-1.  **LocalStorage**: Persist Articles, Saved Words, and History.
-2.  **Analytics**: Word frequency tracking and history logs.
+1.  **项目搭建**: 使用 React + TypeScript + Tailwind CSS 构建单页应用架构。
+2.  **AI 服务层开发**: 
+    - 封装 `services/geminiService.ts`。
+    - 使用 Google GenAI SDK 的 `Schema` 功能，强制 AI 返回严格的 JSON 格式（包含音标、核心含义、联想记忆法字段），解决了 AI 输出格式不稳定的问题。
+3.  **文本处理**: 引入 `Intl.Segmenter` API，实现了将一段纯文本自动拆分为“句子”和“单词 Token”的能力，为点击交互打下基础。
 
-## Phase 4: Customization & Multimedia
-**Goal**: Personalization.
-1.  **Edit Mode**: Modify AI definitions.
-2.  **Image Support**: Upload local images (Base64) or paste URLs.
+## 第二阶段：交互体验优化 (Phase 2)
+**目标**: 让查词过程不打断阅读心流。
 
-## Phase 5: Architecture Refinement & Robustness (Current)
-**Goal**: Optimization, Bug Fixes, and Documentation.
-1.  **Data Consistency Fix**: 
-    - Fixed issue where editing a card (e.g., adding an image) didn't update the `SavedItems` list immediately. 
-    - *Logic Change*: `App.tsx` now watches for updates and syncs them to the persistent store.
-2.  **Smart Export**: 
-    - Implemented logic to strip heavy Base64 images from JSON exports to keep backups small, while preserving URLs.
-3.  **Documentation Overhaul**: 
-    - Rewrote `README.md` to be bilingual.
-    - Added specific architectural diagrams and logic flow descriptions to aid contributors.
+1.  **悬浮窗系统 (Draggable Sheets)**: 
+    - 实现了 `DraggableSheet` 组件。让单词卡片以“浮层”形式出现，且支持拖拽移动，避免遮挡正文。
+2.  **双层交互逻辑**: 
+    - 实现了区分“点击单词”和“点击句子”的逻辑。点击单词出卡片，点击句子出翻译。
+3.  **侧边栏设计**: 增加了右侧 Sidebar，用于展示“收藏夹”，方便快速回顾。
+
+## 第三阶段：数据持久化与统计 (Phase 3)
+**目标**: 让应用具备“记忆”，变成一个真正的学习工具。
+
+1.  **本地存储 (LocalStorage)**: 
+    - 在 `App.tsx` 中引入 `useEffect` 钩子，监听 `articles`, `savedItems`, `history` 的变化并自动写入浏览器本地存储。
+2.  **统计模块 (Analytics)**: 
+    - 开发了 `StatsView`，通过图表展示用户的学习轨迹（查词总数、每日新增）。
+    - 实现了“词频统计”：在阅读新文章时，能自动标记出哪些词是你以前查过的，以及它们在当前文章中出现的频率。
+
+## 第四阶段：个性化与多媒体 (Phase 4)
+**目标**: 支持用户自定义笔记和图片。
+
+1.  **编辑模式**: 允许用户修改 AI 生成的翻译和助记内容。
+2.  **图片支持**: 
+    - 支持用户粘贴图片 URL。
+    - 支持用户上传本地图片（自动转为 Base64 存储），让单词记忆更加形象。
+
+## 第五阶段：架构完善与数据健壮性 (Current Phase)
+**目标**: 优化数据流，修复 Bug，提升数据安全性。
+
+1.  **数据一致性修复**: 
+    - **问题**: 用户在卡片上修改图片后，如果该单词已收藏，收藏夹里的数据没有同步更新。
+    - **解决**: 修改 `App.tsx` 的 `onUpdate` 逻辑，实现了视图层与持久化层的实时同步。
+2.  **独立的单词库管理**: 
+    - **新增**: 在设置中将“全量备份”与“单词库导出”分离。
+    - **合并逻辑**: 实现了 `handleMergeVocabulary`。导入单词库 JSON 时，不再粗暴覆盖，而是智能**合并 (Merge)**，自动跳过重复单词，保留用户现有的积累。
+3.  **导入无反应修复**: 
+    - **问题**: 连续导入同一个文件时，浏览器 `input type="file"` 不触发 `onChange` 事件。
+    - **解决**: 在文件读取结束后，手动重置 input 的 `value` 为空。
+4.  **文档中文化**: 
+    - 全面更新 `README.md` 和 `HISTORY.md` 为中文，清晰阐述了基于 `App.tsx` 的中心化架构设计，方便后人维护。
+
+---
+**未来计划**:
+- [ ] 云端同步 (Firebase)。
+- [ ] 间隔重复复习系统 (SRS)。

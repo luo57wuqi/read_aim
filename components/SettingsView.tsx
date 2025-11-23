@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode } from '../types';
-import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon } from './Icons';
+import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon } from './Icons';
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -14,6 +14,7 @@ interface SettingsViewProps {
       wordStats: WordStatsMap;
   };
   onImportData: (data: BackupData) => void;
+  onMergeVocabulary: (items: SavedItem[]) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
@@ -21,10 +22,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     settings, 
     onSaveSettings,
     data,
-    onImportData
+    onImportData,
+    onMergeVocabulary
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const vocabInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = () => {
       // Clean up data for export
@@ -38,12 +41,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   ...item,
                   cardData: {
                       ...restCardData,
-                      // Optionally add a note or flag that image was stripped
-                      // visual_image_prompt is kept, so user still has the text description.
                   }
               };
           }
-          // If it's a URL (custom_image_url), we keep it as it's just text.
           return item;
       });
 
@@ -62,6 +62,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const a = document.createElement('a');
       a.href = url;
       a.download = `english-reader-backup-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+  };
+
+  const handleExportVocabulary = () => {
+      const words = data.savedItems.filter(item => item.type === 'word');
+      // Similar optimization for images
+      const optimizedWords = words.map(item => {
+        if (item.cardData && item.cardData.custom_image_base64) {
+            const { custom_image_base64, ...restCardData } = item.cardData;
+            return { ...item, cardData: restCardData };
+        }
+        return item;
+      });
+      
+      const blob = new Blob([JSON.stringify(optimizedWords, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vocabulary-db-${new Date().toISOString().slice(0,10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -88,6 +110,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           } catch (err) {
               alert("Failed to parse JSON file.");
               console.error(err);
+          } finally {
+               // Reset input so "onChange" triggers again for the same file if needed
+               if (fileInputRef.current) fileInputRef.current.value = '';
+          }
+      };
+      reader.readAsText(file);
+  };
+
+  const handleImportVocabulary = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          try {
+              const json = JSON.parse(event.target?.result as string);
+              if (Array.isArray(json)) {
+                  onMergeVocabulary(json as SavedItem[]);
+                  onClose();
+              } else {
+                  alert("Invalid vocabulary file format. Expected an array.");
+              }
+          } catch (err) {
+              alert("Failed to parse vocabulary file.");
+              console.error(err);
+          } finally {
+               if (vocabInputRef.current) vocabInputRef.current.value = '';
           }
       };
       reader.readAsText(file);
@@ -198,40 +247,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                 </div>
 
-                {/* Data Management */}
-                <div className="pt-4 border-t border-slate-100">
-                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Backup & Restore</h3>
-                     <div className="grid grid-cols-2 gap-4">
-                         <button 
-                            onClick={handleExport}
-                            className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
-                        >
-                             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-full group-hover:bg-indigo-100">
-                                <DownloadIcon className="w-6 h-6" />
-                             </div>
-                             <span className="font-medium text-slate-700">Backup JSON</span>
-                         </button>
+                {/* Data Management Section - Split into Full Backup & Vocabulary DB */}
+                <div className="pt-4 border-t border-slate-100 space-y-6">
+                     
+                     {/* 1. Vocabulary Database Management (Partial Export) */}
+                     <div>
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                             <CardIcon className="w-4 h-4" />
+                             Vocabulary Database
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-3">
+                            Export just your saved words to reuse in other articles or apps. Merging imports adds new words without deleting existing ones.
+                        </p>
+                        <div className="grid grid-cols-2 gap-4">
+                             <button 
+                                onClick={handleExportVocabulary}
+                                className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 transition-all text-sm font-medium text-indigo-700"
+                            >
+                                <DownloadIcon className="w-4 h-4" />
+                                Export Vocab Only
+                             </button>
 
-                         <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
-                        >
-                             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-full group-hover:bg-emerald-100">
-                                <UploadIcon className="w-6 h-6" />
-                             </div>
-                             <span className="font-medium text-slate-700">Restore JSON</span>
-                         </button>
-                         <input 
-                            ref={fileInputRef}
-                            type="file" 
-                            accept=".json"
-                            onChange={handleImportFile}
-                            className="hidden" 
-                        />
+                             <button 
+                                onClick={() => vocabInputRef.current?.click()}
+                                className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 transition-all text-sm font-medium text-indigo-700"
+                            >
+                                <UploadIcon className="w-4 h-4" />
+                                Merge Vocab JSON
+                             </button>
+                             <input 
+                                ref={vocabInputRef}
+                                type="file" 
+                                accept=".json"
+                                onChange={handleImportVocabulary}
+                                className="hidden" 
+                            />
+                         </div>
                      </div>
-                     <p className="text-xs text-slate-400 mt-2 text-center">
-                         Note: Local image files (uploads) are stripped from backups to save space. URLs are preserved.
-                     </p>
+
+                     {/* 2. Full System Backup (Overwrite) */}
+                     <div>
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Full System Backup</h3>
+                        <p className="text-xs text-slate-500 mb-3">
+                            Save everything (Articles, History, Settings). Restoring will <strong className="text-red-500">overwrite</strong> current data.
+                        </p>
+                        <div className="grid grid-cols-2 gap-4">
+                            <button 
+                                onClick={handleExport}
+                                className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
+                            >
+                                <div className="p-2 bg-slate-100 text-slate-600 rounded-full group-hover:bg-slate-200">
+                                    <DownloadIcon className="w-6 h-6" />
+                                </div>
+                                <span className="font-medium text-slate-700 text-sm">Backup Full App</span>
+                            </button>
+
+                            <button 
+                                onClick={() => fileInputRef.current?.click()}
+                                className="flex flex-col items-center justify-center gap-2 p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all group"
+                            >
+                                <div className="p-2 bg-red-50 text-red-600 rounded-full group-hover:bg-red-100">
+                                    <UploadIcon className="w-6 h-6" />
+                                </div>
+                                <span className="font-medium text-slate-700 text-sm">Restore Backup</span>
+                            </button>
+                            <input 
+                                ref={fileInputRef}
+                                type="file" 
+                                accept=".json"
+                                onChange={handleImportFile}
+                                className="hidden" 
+                            />
+                        </div>
+                     </div>
                 </div>
             </div>
 
