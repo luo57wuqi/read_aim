@@ -128,54 +128,68 @@ function App() {
   const previousCard = wordCardStack.length > 1 ? wordCardStack[wordCardStack.length - 2] : null;
 
   // --- Theme Engine ---
-  // Returns a configuration object for the current theme with hierarchy layers
+  // Improved Hierarchy:
+  // 1. appBg: The absolute back layer.
+  // 2. paperBg: The reading surface, usually brighter/cleaner.
+  // 3. headerBg: Translucent top bar.
+  // 4. shadow: Elevation depth.
   const getThemePalette = () => {
       switch(settings.theme) {
           case 'dark': return {
               appBg: 'bg-slate-950',
               text: 'text-slate-200',
               textMuted: 'text-slate-400',
-              headerBg: 'bg-slate-900/80 border-slate-800',
-              paperBg: 'bg-slate-900 border-slate-800 shadow-2xl shadow-black/50',
+              headerBg: 'bg-slate-900/90 border-slate-800',
+              paperBg: 'bg-slate-900 border-slate-800',
+              shadow: 'shadow-2xl shadow-black/50',
               accent: 'text-indigo-400',
-              highlight: 'bg-indigo-500/20 text-indigo-200'
+              highlight: 'bg-indigo-500/30 text-indigo-100',
+              selection: 'bg-indigo-500/40'
           };
           case 'sepia': return {
-              appBg: 'bg-[#f4ecd8]',
-              text: 'text-[#433422]',
-              textMuted: 'text-[#8a765d]',
-              headerBg: 'bg-[#e8dec0]/90 border-[#d6cbb1]',
-              paperBg: 'bg-[#fdf6e3] border-[#eee8d5] shadow-xl shadow-[#433422]/5',
-              accent: 'text-[#b58900]',
-              highlight: 'bg-[#b58900]/10 text-[#5b4636]'
+              appBg: 'bg-[#f0e6d2]', // Darker cream
+              text: 'text-[#5f4b32]',
+              textMuted: 'text-[#8c7b66]',
+              headerBg: 'bg-[#fcf7ea]/90 border-[#e8dfcc]',
+              paperBg: 'bg-[#fcf7ea] border-[#e8dfcc]', // Lighter cream surface
+              shadow: 'shadow-xl shadow-[#5f4b32]/10',
+              accent: 'text-[#b08d55]',
+              highlight: 'bg-[#b08d55]/20 text-[#5f4b32]',
+              selection: 'bg-[#b08d55]/30'
           };
           case 'forest': return {
-              appBg: 'bg-[#051a14]',
+              appBg: 'bg-[#0f291e]', // Deep green
               text: 'text-[#e2e8f0]',
               textMuted: 'text-[#94a3b8]',
-              headerBg: 'bg-[#0a2f26]/90 border-[#134e3f]',
-              paperBg: 'bg-[#0a2f26] border-[#134e3f] shadow-2xl shadow-black/50',
-              accent: 'text-[#34d399]',
-              highlight: 'bg-[#059669]/20 text-[#d1fae5]'
+              headerBg: 'bg-[#1a4233]/90 border-[#245c48]',
+              paperBg: 'bg-[#1a4233] border-[#245c48]', // Lighter green surface
+              shadow: 'shadow-2xl shadow-black/60',
+              accent: 'text-[#4ade80]',
+              highlight: 'bg-[#4ade80]/20 text-[#ecfdf5]',
+              selection: 'bg-[#4ade80]/30'
           };
           case 'amethyst': return {
-              appBg: 'bg-[#1e1b2e]',
+              appBg: 'bg-[#1e1b2e]', // Deep purple
               text: 'text-[#e9d5ff]',
               textMuted: 'text-[#a78bfa]',
-              headerBg: 'bg-[#2e1065]/50 border-[#4c1d95]',
-              paperBg: 'bg-[#2e1065]/40 border-[#4c1d95] shadow-2xl shadow-[#000]/40',
+              headerBg: 'bg-[#2e2645]/90 border-[#4c3d75]',
+              paperBg: 'bg-[#2e2645] border-[#4c3d75]', // Lighter purple surface
+              shadow: 'shadow-2xl shadow-[#120f1f]/80',
               accent: 'text-[#d8b4fe]',
-              highlight: 'bg-[#7c3aed]/20 text-[#f3e8ff]'
+              highlight: 'bg-[#d8b4fe]/20 text-[#f3e8ff]',
+              selection: 'bg-[#d8b4fe]/30'
           };
           case 'light': 
           default: return {
-              appBg: 'bg-slate-50',
+              appBg: 'bg-slate-100', // Slightly gray back
               text: 'text-slate-800',
               textMuted: 'text-slate-500',
-              headerBg: 'bg-white/80 border-slate-200',
-              paperBg: 'bg-white border-slate-200 shadow-xl shadow-slate-200/50',
+              headerBg: 'bg-white/90 border-slate-200',
+              paperBg: 'bg-white border-slate-200', // Pure white surface
+              shadow: 'shadow-xl shadow-slate-200/60',
               accent: 'text-indigo-600',
-              highlight: 'bg-indigo-50 text-indigo-800'
+              highlight: 'bg-indigo-50 text-indigo-900',
+              selection: 'bg-indigo-100'
           };
       }
   };
@@ -213,13 +227,13 @@ function App() {
               const el = sentenceRefs.current.get(highlightSentenceIndex);
               if (el) {
                   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  el.classList.add('bg-yellow-200/50'); // Softer highlight for dark mode
-                  setTimeout(() => el.classList.remove('bg-yellow-200/50'), 2000);
+                  el.classList.add(theme.selection); // Use theme-based highlight
+                  setTimeout(() => el.classList.remove(theme.selection), 2000);
               }
               setHighlightSentenceIndex(null);
           }, 300);
       }
-  }, [highlightSentenceIndex, viewMode, activeArticleId]);
+  }, [highlightSentenceIndex, viewMode, activeArticleId, theme]);
 
   // Toast Timer
   useEffect(() => {
@@ -538,7 +552,7 @@ function App() {
           <span 
             key={sentence.index} 
             ref={el => { if (el) sentenceRefs.current.set(sentence.index, el); }}
-            className={`transition-colors duration-1000 rounded px-1 ${highlightSentenceIndex === sentence.index ? 'bg-yellow-200 text-slate-900' : ''} ${isInteractiveMode ? 'cursor-pointer' : ''}`}
+            className={`transition-colors duration-500 rounded px-1 ${isInteractiveMode ? 'cursor-pointer' : ''}`}
             id={`sentence-${sentence.index}`}
           >
              {isInteractiveMode && selectionScope === 'word' ? (
@@ -549,7 +563,7 @@ function App() {
                               <span
                                 key={tIdx}
                                 onClick={(e) => handleInteractiveClick(e, token, sentence, 'word')}
-                                className={`rounded px-0.5 transition-colors 
+                                className={`rounded px-0.5 transition-colors duration-200 
                                     ${selectedText === token && !activeTranslation 
                                         ? 'bg-indigo-500 text-white shadow-sm' 
                                         : `hover:opacity-80 hover:underline decoration-2 decoration-indigo-400/50`
@@ -601,7 +615,7 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 relative">
         
         {/* Header */}
-        <header className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors backdrop-blur-sm border-b ${theme.headerBg}`}>
+        <header className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors backdrop-blur-md border-b ${theme.headerBg}`}>
           <div 
             className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
             onClick={() => setViewMode(ViewMode.LIBRARY)}
@@ -705,7 +719,7 @@ function App() {
         ) : (
             <>
                 {/* READ MODE */}
-                <div className="w-full h-1 bg-black/5">
+                <div className="w-full h-1 bg-black/5 relative z-20">
                     <div 
                         className="h-full bg-indigo-500 transition-all duration-150 ease-out"
                         style={{ width: `${readingProgress}%` }}
@@ -722,8 +736,8 @@ function App() {
                         setWordCardStack([]);
                     }}
                 >
-                    <div className={`max-w-3xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-300 
-                        ${theme.paperBg} ${theme.text}
+                    <div className={`max-w-3xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-500 
+                        ${theme.paperBg} ${theme.text} ${theme.shadow} border
                         `}
                     >
                         {!activeArticle ? (

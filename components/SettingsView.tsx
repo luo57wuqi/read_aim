@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode, Theme, CustomApiConfig } from '../types';
-import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon } from './Icons';
+import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon, SparklesIcon } from './Icons';
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -16,6 +16,34 @@ interface SettingsViewProps {
   onImportData: (data: BackupData) => void;
   onMergeVocabulary: (items: SavedItem[]) => void;
 }
+
+const REQUIRED_JSON_FIELDS = [
+    { key: 'word', desc: '单词拼写 (String)' },
+    { key: 'phonetic', desc: '音标 (String)' },
+    { key: 'translation', desc: '中文释义 (String)' },
+    { key: 'recorded_meanings', desc: '详细字典释义 (String)' },
+    { key: 'mnemonic_analysis', desc: '联想记忆法解析，核心字段 (String)' },
+    { key: 'core_logic', desc: '核心抽象含义，如"让高度升高" (String)' },
+    { key: 'visual_image_prompt', desc: '画面感描述 (String)' },
+    { key: 'scenario_sentence_en', desc: '英文例句 (String)' },
+    { key: 'scenario_sentence_cn', desc: '例句翻译 (String)' },
+    { key: 'related_word_suggestion', desc: '可选：关联词对象 {word, reason}' },
+];
+
+const OPENAI_BODY_TEMPLATE = `{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an expert English vocabulary teacher. You MUST return valid JSON only. Do not wrap in markdown code blocks."
+    },
+    {
+      "role": "user",
+      "content": "Analyze the English word: '{{word}}'. Create a vocabulary card for a Chinese learner using Associative Memory techniques.\\n\\nReturn a JSON object with exactly these keys:\\n{\\n  \\"word\\": \\"{{word}}\\",\\n  \\"phonetic\\": \\"IPA\\",\\n  \\"translation\\": \\"Common meaning\\",\\n  \\"recorded_meanings\\": \\"Detailed dictionary definitions\\",\\n  \\"mnemonic_analysis\\": \\"Explain using sound/spelling/root associations in Chinese\\",\\n  \\"core_logic\\": \\"Abstract core concept (short)\\",\\n  \\"visual_image_prompt\\": \\"Description for a visual aid image\\",\\n  \\"scenario_sentence_en\\": \\"Example sentence\\",\\n  \\"scenario_sentence_cn\\": \\"Sentence translation\\",\\n  \\"related_word_suggestion\\": { \\"word\\": \\"related_word\\", \\"reason\\": \\"why\\" }\\n}"
+    }
+  ],
+  "temperature": 0.7
+}`;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
     onClose, 
@@ -53,6 +81,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               responseMapping: '',
               ...prev.customApiConfig,
               [field]: value
+          }
+      }));
+  };
+
+  const applyPreset = () => {
+      if(!confirm("This will overwrite your current API settings. Continue?")) return;
+      
+      setLocalSettings(prev => ({
+          ...prev,
+          customApiConfig: {
+              url: 'https://api.openai.com/v1/chat/completions',
+              method: 'POST',
+              headers: [
+                  { key: 'Content-Type', value: 'application/json' },
+                  { key: 'Authorization', value: 'Bearer YOUR_API_KEY_HERE' }
+              ],
+              bodyTemplate: OPENAI_BODY_TEMPLATE,
+              responseMapping: 'choices[0].message.content'
           }
       }));
   };
@@ -244,7 +290,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         </div>
                         {localSettings.dataSourceMode === 'ai' && (
                             <div className="mt-3">
-                                <label className="block text-xs text-slate-500 mb-1">Gemini AI Key (Optional Override)</label>
+                                <label className="block text-xs text-slate-500 mb-1">Gemini API Key (Optional Override)</label>
                                 <input 
                                     type="password"
                                     value={localSettings.customApiKey || ''}
@@ -300,21 +346,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 )}
 
                 {activeTab === 'advanced' && (
-                    <div className="space-y-6">
-                        <div className="bg-amber-50 p-3 rounded text-xs text-amber-800 leading-relaxed border border-amber-100">
-                            <strong>Note:</strong> Custom API mode requires you to configure the request structure manually.
+                    <div className="space-y-6 pb-10">
+                        
+                        {/* Presets Section */}
+                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-sm font-bold text-indigo-800">快速预设 (Presets)</h3>
+                                <SparklesIcon className="w-4 h-4 text-indigo-500" />
+                            </div>
+                            <p className="text-xs text-indigo-600 mb-3">
+                                Use this to quickly configure OpenAI-compatible APIs (DeepSeek, Moonshot, etc).
+                            </p>
+                            <button 
+                                onClick={applyPreset}
+                                className="w-full py-2 bg-white border border-indigo-200 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 transition-colors shadow-sm"
+                            >
+                                Load Preset: OpenAI / Compatible
+                            </button>
                         </div>
 
+                        {/* Warning */}
+                        <div className="bg-amber-50 p-3 rounded text-xs text-amber-800 leading-relaxed border border-amber-100">
+                            <strong>Note:</strong> Custom API mode requires you to configure the request manually. Ensure your model returns the correct JSON structure (see bottom).
+                        </div>
+
+                        {/* Configuration Form */}
                         <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint URL</label>
                             <input 
                                 type="text"
                                 value={localSettings.customApiConfig?.url || ''}
                                 onChange={(e) => updateApiConfig('url', e.target.value)}
-                                placeholder="https://api.example.com/v1/analyze?word={{word}}"
+                                placeholder="https://api.openai.com/v1/chat/completions"
                                 className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
                             />
-                            <p className="text-[10px] text-slate-400 mt-1">Available variable: <code>{`{{word}}`}</code></p>
+                            <p className="text-[10px] text-slate-400 mt-1">Available variable for GET: <code>{`{{word}}`}</code></p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -335,7 +401,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                     type="text"
                                     value={localSettings.customApiConfig?.responseMapping || ''}
                                     onChange={(e) => updateApiConfig('responseMapping', e.target.value)}
-                                    placeholder="e.g. data.candidates[0].content"
+                                    placeholder="choices[0].message.content"
                                     className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
                                 />
                              </div>
@@ -378,10 +444,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                     value={localSettings.customApiConfig?.bodyTemplate || ''}
                                     onChange={(e) => updateApiConfig('bodyTemplate', e.target.value)}
                                     placeholder={'{\n  "prompt": "Explain {{word}}",\n  "model": "gpt-4"\n}'}
-                                    className="w-full p-2 border border-slate-300 rounded font-mono text-xs h-32"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-xs h-48 leading-normal"
                                 />
+                                <p className="text-[10px] text-slate-400 mt-1">Use <code>{`{{word}}`}</code> to inject the selected word.</p>
                             </div>
                         )}
+
+                         {/* Data Contract Description */}
+                         <div className="pt-4 border-t border-slate-200 mt-6">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase mb-3">接口响应数据规范 (Required JSON Response)</h3>
+                            <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 overflow-x-auto">
+                                <p className="text-[10px] text-slate-400 mb-2">Your API must return a JSON object with these exact keys:</p>
+                                <table className="w-full text-left border-collapse">
+                                    <tbody>
+                                        {REQUIRED_JSON_FIELDS.map(f => (
+                                            <tr key={f.key} className="border-b border-slate-100 last:border-0">
+                                                <td className="py-1 pr-2 font-mono text-[10px] text-indigo-600 font-semibold">{f.key}</td>
+                                                <td className="py-1 text-[10px] text-slate-600">{f.desc}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>

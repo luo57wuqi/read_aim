@@ -1,9 +1,9 @@
 
 # Smart English Reader 操作手册
 
-欢迎使用 **Smart English Reader**！这是一款基于 AI 的智能英语阅读辅助工具，旨在通过“语境感知”和“联想记忆法”帮助您深度学习英语单词，而不仅仅是查看枯燥的释义。
+欢迎使用 **Smart English Reader**！这是一款基于 AI 的智能英语阅读辅助工具，旨在通过“语境感知”和“联想记忆法”帮助您深度学习英语单词。
 
-本手册将详细介绍如何使用该应用的各项功能。
+本手册将详细介绍如何使用该应用的各项功能，并提供数据结构的详细说明，方便您进行微调或二次开发。
 
 ---
 
@@ -22,10 +22,6 @@
     *   **操作**: 将顶部工具栏的模式开关切换至 **"Sentence"**。点击文章中的任意句子。
     *   **结果**: 系统会高亮整句，并弹出 **"Translate Sentence"** 按钮。点击后，AI 会提供结合上下文的精准翻译。
 
-*   **显示全文翻译 (Show CN)**:
-    *   点击顶部工具栏的 **"CN"** 按钮。系统会在每个英文段落/句子下方显示中文翻译。
-    *   *注意*: 如果文章较长，系统需要几秒钟时间来逐段翻译，此时按钮旁会有加载动画。
-
 *   **交互模式 (Toggle Interactive)**:
     *   点击顶部的手指图标（Touch Icon）可以开启/关闭点击取词功能。关闭后，您可以像阅读普通网页一样选择复制文本。
 
@@ -38,16 +34,11 @@
     *   **有意思发现 [核心功能]**: AI 生成的联想记忆法（谐音、词根、拆分），帮助您“秒记”单词。
     *   **图 (Visual)**: 描述该单词的画面感。您可以**上传自己的图片**来强化记忆。
     *   **核心含义内核**: 单词最底层的抽象逻辑（如：heave -> 让高度升高）。
-    *   **例句**: 当前上下文的例句。
     *   **深度关联 (Deep Dive)**: 底部推荐的一个相关单词，点击可继续生成新卡片，形成“知识链”。
 
 *   **编辑卡片**:
     *   点击卡片右上角的 **铅笔图标** 进入编辑模式。
     *   您可以修改记忆法、上传图片（支持自动压缩以节省空间），或修改例句。
-    *   点击 **"Done"** 保存修改。
-
-*   **收藏单词**:
-    *   点击卡片底部的 **"Save Card"**。该单词将被保存到侧边栏的“收藏夹”中，供日后复习。
 
 ### 1.3 文章库 (Library)
 
@@ -55,17 +46,7 @@
 
 *   **导入文章**:
     *   点击 **"Paste / Import Article"**。
-    *   您可以粘贴任何英文文本（新闻、小说、论文）。
-    *   点击 **"Save"** 后，系统会自动分句并排版。
-*   **切换文章**: 直接点击卡片即可打开。
-*   **删除文章**: 将鼠标悬停在文章卡片上，点击右上角的垃圾桶图标。
-
-### 1.4 统计与回顾 (Analytics)
-
-点击顶部工具栏的 **图表图标** 进入数据统计界面。
-
-*   **Activity Log**: 查看您所有的查询历史（添加、删除、查询）。点击单词可快速跳转回文章对应的位置。
-*   **Word Frequency**: 查看您遇到过的单词频率。系统会统计您在不同文章中遇到该单词的次数。
+    *   您可以粘贴任何英文文本。点击 **"Save"** 后，系统会自动分句并排版。
 
 ---
 
@@ -81,35 +62,99 @@
 4.  **森林 (Forest)**: 深绿色背景，低对比度，适合长时间沉浸阅读。
 5.  **紫罗兰 (Amethyst)**: 优雅的深紫色调，提供独特的视觉体验。
 
-### 2.2 数据源模式 (Data Source)
-*   **Gemini AI (默认)**: 使用 Google 官方模型生成内容。
-*   **Local Only**: 仅查询本地已保存的单词卡片。离线时使用。
-*   **Custom API (高级)**: 允许您连接自定义的后端或第三方字典 API。
-
-### 2.3 高级接口配置 (Custom API)
-如果您是开发者或有特殊需求，可以配置 Custom API：
-*   **Endpoint URL**: 输入 API 地址，使用 `{{word}}` 代表查询词。例如: `https://my-dict.com/api/v1/lookup?q={{word}}`
-*   **Method**: GET 或 POST。
-*   **Body Template**: 如果是 POST，可以编写 JSON 模板。例如: `{"query": "{{word}}", "lang": "en"}`。
-*   **Response Mapping**: 告诉应用如何从复杂的 JSON 返回中提取单词数据。例如 `data.result.card`。
-
-### 2.4 数据备份与恢复
-*   **导出单词本**: 仅导出您收藏的单词数据，体积小。
+### 2.2 数据备份与恢复
+*   **导出单词本**: 仅导出您收藏的单词数据 (JSON 格式)，体积小。
 *   **全量备份**: 包含文章、历史记录、设置和单词。
 *   **包含图片**: 勾选后，备份文件将包含您上传的图片（文件体积会显著变大）。
 
 ---
 
-## ❓ 常见问题 (FAQ)
+## 🔗 4. 自定义接入其他 AI 模型 (Custom API)
 
-**Q: 上传的图片去哪了？**
-A: 图片经过压缩后（Base64格式）直接保存在您的浏览器本地存储（LocalStorage）中。请注意，如果您清空浏览器缓存，图片可能会丢失，请定期使用“全量备份”功能导出数据。
+如果您想使用 **DeepSeek**、**OpenAI (GPT-4)** 或其他兼容 OpenAI 格式的接口，请按以下步骤操作：
 
-**Q: 为什么翻译有时候很慢？**
-A: 全文翻译需要 AI 逐句处理。如果文章很长，建议先阅读，按需点击句子进行单句翻译。
+1.  打开设置，切换到 **"高级接口 (Advanced API)"** 选项卡。
+2.  **数据源选择**: 确保在“通用”页签中，数据源已切换为 **Custom API**。
+3.  **使用预设**: 点击 **"Load Preset: OpenAI / Compatible"** 按钮。
+    *   这会自动填入 Body Template 和 Response Mapping。
+4.  **修改 URL**:
+    *   OpenAI: `https://api.openai.com/v1/chat/completions`
+    *   DeepSeek: `https://api.deepseek.com/chat/completions` (示例)
+5.  **修改 Header**:
+    *   找到 `Authorization` 字段，将 `Bearer YOUR_API_KEY_HERE` 替换为您真实的 API Key (例如 `Bearer sk-xxxxxxxx`)。
 
-**Q: 如何在手机上使用？**
-A: 本应用采用响应式设计，完全适配手机浏览器。侧边栏在手机上会变成一个从右侧滑出的抽屉菜单。
+### 重要：接口响应数据规范
+您的模型 **必须** 返回一段 JSON（不能包含 Markdown 代码块），且 JSON 对象必须包含以下 Keys，否则应用会报错：
+
+| 字段 Key | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `word` | String | 单词本身 |
+| `phonetic` | String | 音标 |
+| `translation` | String | 中文释义 |
+| `recorded_meanings` | String | 详细字典含义 |
+| `mnemonic_analysis` | String | **联想记忆法解析** (核心) |
+| `core_logic` | String | 核心抽象逻辑 (简短) |
+| `visual_image_prompt` | String | 画面描述 |
+| `scenario_sentence_en` | String | 英文例句 |
+| `scenario_sentence_cn` | String | 例句中文翻译 |
+
+*如果您使用的是 DeepSeek 或 Claude，请务必在 Prompt (Body Template) 中明确要求它“Return valid JSON only”，不要输出任何思考过程或 Markdown 标记。*
+
+---
+
+## 📊 3. 数据结构说明 (Data Structure)
+
+如果您需要微调代码或分析导出的 JSON 数据，请参考以下核心数据结构。
+
+### 3.1 单词卡片 (`WordCardData`)
+这是应用中最核心的数据单元，由 Gemini AI 生成或 Custom API 返回。
+
+```json
+{
+  "word": "serendipity",
+  "phonetic": "ˌsɛrənˈdɪpɪti",
+  "translation": "n. 意外发现珍奇事物的本领；机缘凑巧",
+  
+  // 核心记忆法字段
+  "recorded_meanings": "n. 意外发现珍奇事物的本领...",
+  "mnemonic_analysis": "Seren (Serene 宁静的) + dip (浸泡) + ity...",
+  "core_logic": "意外的美好",
+  "visual_image_prompt": "一个人在海边捡贝壳...",
+  
+  // 用户自定义字段 (可选)
+  "custom_image_base64": "data:image/jpeg;base64,...", 
+  
+  // 上下文例句
+  "scenario_sentence_en": "The discovery of penicillin was pure serendipity.",
+  "scenario_sentence_cn": "青霉素的发现纯属机缘巧合。",
+  
+  // 关联词推荐
+  "related_word_suggestion": {
+    "word": "fortune",
+    "reason": "Both relate to luck..."
+  }
+}
+```
+
+### 3.2 收藏项 (`SavedItem`)
+保存在侧边栏列表中的项目。
+
+```json
+{
+  "id": "1710000000123",
+  "type": "word", // 或 "sentence"
+  "original": "serendipity",
+  "translation": "机缘凑巧",
+  "cardData": { ...WordCardData... }, // 如果是单词，这里包含完整卡片信息
+  "timestamp": 1710000000123,
+  
+  // 来源回溯信息
+  "sourceArticleId": "default-1",
+  "sourceArticleTitle": "Serendipity in Science",
+  "sourceContextSentence": "The concept of serendipity often...",
+  "sourceSentenceIndex": 0
+}
+```
 
 ---
 **License**: MIT
