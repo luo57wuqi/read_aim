@@ -3,14 +3,29 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { WordCardData, AppSettings } from '../types';
 
 const getAIClient = (settings?: AppSettings) => {
-  // 1. Try Settings Override
+  // Determine API Key
+  let apiKey = process.env.API_KEY; // Default from build process
+  
+  // In Vite local dev, process.env might be polyfilled but empty depending on config.
+  // We prefer settings override first.
   if (settings?.customApiKey) {
-      return new GoogleGenAI({ apiKey: settings.customApiKey });
+      apiKey = settings.customApiKey;
+  }
+  
+  if (!apiKey) {
+      throw new Error("An API Key must be set when running in a browser. Please add it in Settings.");
   }
 
-  // 2. Fallback to process.env.API_KEY
-  // We assume the environment variable is valid and accessible.
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Determine Base URL (Proxy)
+  // If user provided a custom base URL in settings, use it.
+  const clientOptions: any = { apiKey: apiKey };
+  
+  if (settings?.geminiBaseUrl && settings.geminiBaseUrl.trim() !== '') {
+      // The SDK allows baseUrl in constructor options
+      clientOptions.baseUrl = settings.geminiBaseUrl;
+  }
+
+  return new GoogleGenAI(clientOptions);
 };
 
 const getModelName = (settings?: AppSettings) => {

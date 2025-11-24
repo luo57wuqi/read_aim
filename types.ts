@@ -94,6 +94,7 @@ export interface CustomApiConfig {
 export interface AppSettings {
   aiModel: string; // e.g. 'gemini-2.5-flash'
   customApiKey?: string; // Optional user override
+  geminiBaseUrl?: string; // Optional Base URL for proxying (e.g. https://my-proxy.com)
   dataSourceMode: DataSourceMode; // Preference for fetching data
   
   // Backend Server Config

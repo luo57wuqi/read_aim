@@ -304,15 +304,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             </button>
                         </div>
                         {localSettings.dataSourceMode === 'ai' && (
-                            <div className="mt-3">
-                                <label className="block text-xs text-slate-500 mb-1">Gemini API Key (Optional Override)</label>
-                                <input 
-                                    type="password"
-                                    value={localSettings.customApiKey || ''}
-                                    onChange={(e) => setLocalSettings(p => ({...p, customApiKey: e.target.value}))}
-                                    placeholder="Use environment key by default"
-                                    className="w-full p-2 border border-slate-300 rounded text-sm font-mono"
-                                />
+                            <div className="mt-3 space-y-2">
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Gemini API Key (Optional Override)</label>
+                                    <input 
+                                        type="password"
+                                        value={localSettings.customApiKey || ''}
+                                        onChange={(e) => setLocalSettings(p => ({...p, customApiKey: e.target.value}))}
+                                        placeholder="Use environment key by default"
+                                        className="w-full p-2 border border-slate-300 rounded text-sm font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Gemini Base URL (Proxy) - Optional</label>
+                                    <input 
+                                        type="text"
+                                        value={localSettings.geminiBaseUrl || ''}
+                                        onChange={(e) => setLocalSettings(p => ({...p, geminiBaseUrl: e.target.value}))}
+                                        placeholder="https://your-proxy-domain.com"
+                                        className="w-full p-2 border border-slate-300 rounded text-sm font-mono"
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">If you are in China, you may need a proxy URL.</p>
+                                </div>
                             </div>
                         )}
                     </div>
