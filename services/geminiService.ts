@@ -3,11 +3,14 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { WordCardData, AppSettings } from '../types';
 
 const getAIClient = (settings?: AppSettings) => {
-  const apiKey = settings?.customApiKey || process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key not found in environment variables or settings");
+  // 1. Try Settings Override
+  if (settings?.customApiKey) {
+      return new GoogleGenAI({ apiKey: settings.customApiKey });
   }
-  return new GoogleGenAI({ apiKey });
+
+  // 2. Fallback to process.env.API_KEY
+  // We assume the environment variable is valid and accessible.
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 const getModelName = (settings?: AppSettings) => {
