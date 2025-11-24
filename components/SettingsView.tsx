@@ -1,7 +1,8 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode, Theme, CustomApiConfig } from '../types';
-import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon, SparklesIcon } from './Icons';
+import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon, SparklesIcon, ClockIcon } from './Icons';
+import { api } from '../services/backendService';
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -54,8 +55,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     onMergeVocabulary
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'general' | 'advanced'>('general');
-  const [includeImages, setIncludeImages] = useState(false); // Default false to save space
+  const [activeTab, setActiveTab] = useState<'general' | 'advanced' | 'server'>('general');
+  const [includeImages, setIncludeImages] = useState(false);
+  const [serverStatus, setServerStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vocabInputRef = useRef<HTMLInputElement>(null);
@@ -118,6 +120,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const current = [...(localSettings.customApiConfig?.headers || [])];
       current.splice(index, 1);
       updateApiConfig('headers', current);
+  };
+
+  const checkServerConnection = async () => {
+      setServerStatus('unknown');
+      const url = localSettings.serverUrl || 'http://localhost:5000';
+      const isOk = await api.checkStatus(url);
+      setServerStatus(isOk ? 'ok' : 'error');
   };
 
   // --- Export Logic ---
@@ -221,18 +230,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-slate-200 shrink-0">
+            <div className="flex border-b border-slate-200 shrink-0 overflow-x-auto">
                 <button 
                     onClick={() => setActiveTab('general')}
-                    className={`flex-1 py-3 text-sm font-bold border-b-2 ${activeTab === 'general' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                    className={`flex-1 py-3 px-4 text-sm font-bold border-b-2 whitespace-nowrap ${activeTab === 'general' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
                 >
-                    通用 & 主题 (General)
+                    通用 (General)
                 </button>
                 <button 
                     onClick={() => setActiveTab('advanced')}
-                    className={`flex-1 py-3 text-sm font-bold border-b-2 ${activeTab === 'advanced' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                    className={`flex-1 py-3 px-4 text-sm font-bold border-b-2 whitespace-nowrap ${activeTab === 'advanced' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
                 >
-                    高级接口 (Advanced API)
+                    AI 配置 (AI API)
+                </button>
+                <button 
+                    onClick={() => setActiveTab('server')}
+                    className={`flex-1 py-3 px-4 text-sm font-bold border-b-2 whitespace-nowrap ${activeTab === 'server' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                >
+                    后端同步 (Server)
                 </button>
             </div>
 
@@ -264,7 +279,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* Data Source Basic */}
                     <div>
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">数据源 (Data Source)</h3>
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">单词来源 (Dictionary Source)</h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <button 
                                 onClick={() => setLocalSettings(p => ({...p, dataSourceMode: 'ai'}))}
@@ -304,7 +319,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* Export / Import */}
                     <div className="pt-4 border-t border-slate-100">
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">数据管理 (Data Management)</h3>
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">本地数据管理 (Local Data)</h3>
                         
                         <div className="flex items-center gap-2 mb-4 bg-yellow-50 p-2 rounded text-xs text-yellow-800 border border-yellow-200">
                             <input 
@@ -314,7 +329,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 onChange={(e) => setIncludeImages(e.target.checked)}
                                 className="rounded text-indigo-600 focus:ring-indigo-500"
                             />
-                            <label htmlFor="incImg">备份包含图片 (Include Images) - File size will be larger</label>
+                            <label htmlFor="incImg">备份包含图片 (Include Images) - Large file size</label>
                         </div>
 
                         <div className="space-y-4">
@@ -343,6 +358,71 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <input ref={vocabInputRef} type="file" accept=".json" onChange={handleImportVocabulary} className="hidden" />
                     <input ref={fileInputRef} type="file" accept=".json" onChange={handleImportFile} className="hidden" />
                     </>
+                )}
+                
+                {activeTab === 'server' && (
+                    <div className="space-y-6">
+                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-sm font-bold text-blue-800">自托管 Python 后端 (Self-Hosted Backend)</h3>
+                                <ClockIcon className="w-4 h-4 text-blue-500" />
+                            </div>
+                            <p className="text-xs text-blue-600 mb-3 leading-relaxed">
+                                Connect to a local Flask + SQLite server to manage data outside the browser. 
+                                <br/>
+                                <strong>Note:</strong> When "Server Mode" is enabled below, the app will read/write directly to your database instead of LocalStorage.
+                            </p>
+                        </div>
+
+                        {/* Server URL Config */}
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Server URL</label>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text"
+                                    value={localSettings.serverUrl || 'http://localhost:5000'}
+                                    onChange={(e) => setLocalSettings(p => ({...p, serverUrl: e.target.value}))}
+                                    placeholder="http://localhost:5000"
+                                    className="flex-1 p-2 border border-slate-300 rounded font-mono text-sm"
+                                />
+                                <button 
+                                    onClick={checkServerConnection}
+                                    className="px-3 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-600 hover:bg-slate-200"
+                                >
+                                    Test
+                                </button>
+                            </div>
+                            
+                            {serverStatus === 'ok' && <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">● Connected successfully</p>}
+                            {serverStatus === 'error' && <p className="text-xs text-red-500 mt-1 flex items-center gap-1">● Connection failed. Is the Flask app running?</p>}
+                        </div>
+
+                        {/* Enable Server Mode Toggle */}
+                        <div className="flex items-center justify-between p-4 border border-slate-200 rounded-lg bg-slate-50">
+                            <div>
+                                <span className="block font-bold text-slate-700 text-sm">启用服务器存储 (Enable Server Storage)</span>
+                                <span className="text-xs text-slate-500">Overrides LocalStorage. Ensure server is running.</span>
+                            </div>
+                            <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                <input 
+                                    type="checkbox" 
+                                    name="toggle" 
+                                    id="server-toggle" 
+                                    checked={localSettings.dataSourceMode === 'server'}
+                                    onChange={(e) => setLocalSettings(p => ({
+                                        ...p, 
+                                        dataSourceMode: e.target.checked ? 'server' : 'ai' // Default back to AI if off
+                                    }))}
+                                    className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 ease-in-out checked:right-0 right-5 checked:border-indigo-600"
+                                    style={{ right: localSettings.dataSourceMode === 'server' ? '0' : 'auto', left: localSettings.dataSourceMode === 'server' ? 'auto' : '0' }}
+                                />
+                                <label 
+                                    htmlFor="server-toggle" 
+                                    className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors duration-300 ${localSettings.dataSourceMode === 'server' ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                                ></label>
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {activeTab === 'advanced' && (

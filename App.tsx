@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
 import { fetchFromCustomApi } from './services/customApiService';
+import { api } from './services/backendService';
 import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData } from './types';
 import { Sidebar } from './components/Sidebar';
 import { VocabularyCard } from './components/VocabularyCard';
@@ -17,7 +18,8 @@ const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in s
 const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-2.5-flash',
     dataSourceMode: 'ai',
-    theme: 'light'
+    theme: 'light',
+    serverUrl: 'http://localhost:5000'
 };
 
 function App() {
@@ -74,33 +76,78 @@ function App() {
 
   // --- Initialization & Persistence ---
 
+  // Load Settings first
   useEffect(() => {
-    // Load persisted data
-    const saved = localStorage.getItem('english_reader_saved_items');
-    if (saved) setSavedItems(JSON.parse(saved));
-    
-    const history = localStorage.getItem('english_reader_history_records');
-    if (history) setHistoryRecords(JSON.parse(history));
-
-    const stats = localStorage.getItem('english_reader_word_stats');
-    if (stats) setWordStats(JSON.parse(stats));
-
     const savedSettings = localStorage.getItem('english_reader_settings');
-    if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
-
-    const savedArticles = localStorage.getItem('english_reader_articles');
-    if (savedArticles) {
-        const parsedArticles = JSON.parse(savedArticles);
-        setArticles(parsedArticles);
-        if (parsedArticles.length > 0) {
-            setActiveArticleId(parsedArticles[0].id);
-        } else {
-            createDefaultArticle();
-        }
-    } else {
-        createDefaultArticle();
+    if (savedSettings) {
+        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
     }
   }, []);
+
+  // Data Loading Effect (Handles Local vs Server)
+  useEffect(() => {
+    const loadData = async () => {
+        // 1. Load LocalStorage (Always load as fallback or base)
+        const savedItemsLocal = JSON.parse(localStorage.getItem('english_reader_saved_items') || '[]');
+        const articlesLocal = JSON.parse(localStorage.getItem('english_reader_articles') || '[]');
+        const historyLocal = JSON.parse(localStorage.getItem('english_reader_history_records') || '[]');
+        const statsLocal = JSON.parse(localStorage.getItem('english_reader_word_stats') || '{}');
+
+        if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+            try {
+                // Server Mode: Fetch from Python Backend
+                const [serverArticles, serverItems] = await Promise.all([
+                    api.getArticles(settings.serverUrl),
+                    api.getSavedItems(settings.serverUrl)
+                ]);
+                
+                setArticles(serverArticles);
+                setSavedItems(serverItems);
+                
+                // Note: History and Stats are currently still local-only for simplicity in this iteration
+                setHistoryRecords(historyLocal);
+                setWordStats(statsLocal);
+                
+                if (serverArticles.length > 0 && !activeArticleId) {
+                    setActiveArticleId(serverArticles[0].id);
+                } else if (serverArticles.length === 0) {
+                    // If server is empty but connected, maybe don't show default? Or show default.
+                    // Let's show default if absolutely nothing
+                    createDefaultArticle();
+                }
+            } catch (err) {
+                console.error("Server Sync Failed, falling back to local", err);
+                setToast("Server Connection Failed. Using Local Data.");
+                setArticles(articlesLocal);
+                setSavedItems(savedItemsLocal);
+                setHistoryRecords(historyLocal);
+                setWordStats(statsLocal);
+                if (articlesLocal.length === 0) createDefaultArticle();
+            }
+        } else {
+            // Local Mode
+            setArticles(articlesLocal);
+            setSavedItems(savedItemsLocal);
+            setHistoryRecords(historyLocal);
+            setWordStats(statsLocal);
+            if (articlesLocal.length === 0) createDefaultArticle();
+        }
+    };
+
+    loadData();
+  }, [settings.dataSourceMode, settings.serverUrl]); // Reload when mode changes
+
+  // Persist State (Handles Local vs Server Saving)
+  // We separate the useEffects to avoid infinite loops and handle specific saving logic
+
+  // Local Persistence (Always backup to local)
+  useEffect(() => {
+      localStorage.setItem('english_reader_saved_items', JSON.stringify(savedItems));
+      localStorage.setItem('english_reader_articles', JSON.stringify(articles));
+      localStorage.setItem('english_reader_history_records', JSON.stringify(historyRecords));
+      localStorage.setItem('english_reader_word_stats', JSON.stringify(wordStats));
+      localStorage.setItem('english_reader_settings', JSON.stringify(settings));
+  }, [savedItems, articles, historyRecords, wordStats, settings]);
 
   const createDefaultArticle = () => {
       const sentences = processTextToArticle(DEFAULT_TEXT);
@@ -115,24 +162,12 @@ function App() {
       setActiveArticleId(defaultArticle.id);
   };
 
-  // Persist State
-  useEffect(() => localStorage.setItem('english_reader_saved_items', JSON.stringify(savedItems)), [savedItems]);
-  useEffect(() => localStorage.setItem('english_reader_history_records', JSON.stringify(historyRecords)), [historyRecords]);
-  useEffect(() => localStorage.setItem('english_reader_word_stats', JSON.stringify(wordStats)), [wordStats]);
-  useEffect(() => localStorage.setItem('english_reader_articles', JSON.stringify(articles)), [articles]);
-  useEffect(() => localStorage.setItem('english_reader_settings', JSON.stringify(settings)), [settings]);
-
   // --- Derived State ---
   const activeArticle = articles.find(a => a.id === activeArticleId);
   const topCard = wordCardStack.length > 0 ? wordCardStack[wordCardStack.length - 1] : null;
   const previousCard = wordCardStack.length > 1 ? wordCardStack[wordCardStack.length - 2] : null;
 
   // --- Theme Engine ---
-  // Improved Hierarchy:
-  // 1. appBg: The absolute back layer.
-  // 2. paperBg: The reading surface, usually brighter/cleaner.
-  // 3. headerBg: Translucent top bar.
-  // 4. shadow: Elevation depth.
   const getThemePalette = () => {
       switch(settings.theme) {
           case 'dark': return {
@@ -147,33 +182,33 @@ function App() {
               selection: 'bg-indigo-500/40'
           };
           case 'sepia': return {
-              appBg: 'bg-[#f0e6d2]', // Darker cream
+              appBg: 'bg-[#f0e6d2]', 
               text: 'text-[#5f4b32]',
               textMuted: 'text-[#8c7b66]',
               headerBg: 'bg-[#fcf7ea]/90 border-[#e8dfcc]',
-              paperBg: 'bg-[#fcf7ea] border-[#e8dfcc]', // Lighter cream surface
+              paperBg: 'bg-[#fcf7ea] border-[#e8dfcc]', 
               shadow: 'shadow-xl shadow-[#5f4b32]/10',
               accent: 'text-[#b08d55]',
               highlight: 'bg-[#b08d55]/20 text-[#5f4b32]',
               selection: 'bg-[#b08d55]/30'
           };
           case 'forest': return {
-              appBg: 'bg-[#0f291e]', // Deep green
+              appBg: 'bg-[#0f291e]', 
               text: 'text-[#e2e8f0]',
               textMuted: 'text-[#94a3b8]',
               headerBg: 'bg-[#1a4233]/90 border-[#245c48]',
-              paperBg: 'bg-[#1a4233] border-[#245c48]', // Lighter green surface
+              paperBg: 'bg-[#1a4233] border-[#245c48]', 
               shadow: 'shadow-2xl shadow-black/60',
               accent: 'text-[#4ade80]',
               highlight: 'bg-[#4ade80]/20 text-[#ecfdf5]',
               selection: 'bg-[#4ade80]/30'
           };
           case 'amethyst': return {
-              appBg: 'bg-[#1e1b2e]', // Deep purple
+              appBg: 'bg-[#1e1b2e]', 
               text: 'text-[#e9d5ff]',
               textMuted: 'text-[#a78bfa]',
               headerBg: 'bg-[#2e2645]/90 border-[#4c3d75]',
-              paperBg: 'bg-[#2e2645] border-[#4c3d75]', // Lighter purple surface
+              paperBg: 'bg-[#2e2645] border-[#4c3d75]', 
               shadow: 'shadow-2xl shadow-[#120f1f]/80',
               accent: 'text-[#d8b4fe]',
               highlight: 'bg-[#d8b4fe]/20 text-[#f3e8ff]',
@@ -181,11 +216,11 @@ function App() {
           };
           case 'light': 
           default: return {
-              appBg: 'bg-slate-100', // Slightly gray back
+              appBg: 'bg-slate-100', 
               text: 'text-slate-800',
               textMuted: 'text-slate-500',
               headerBg: 'bg-white/90 border-slate-200',
-              paperBg: 'bg-white border-slate-200', // Pure white surface
+              paperBg: 'bg-white border-slate-200', 
               shadow: 'shadow-xl shadow-slate-200/60',
               accent: 'text-indigo-600',
               highlight: 'bg-indigo-50 text-indigo-900',
@@ -227,7 +262,7 @@ function App() {
               const el = sentenceRefs.current.get(highlightSentenceIndex);
               if (el) {
                   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  el.classList.add(theme.selection); // Use theme-based highlight
+                  el.classList.add(theme.selection); 
                   setTimeout(() => el.classList.remove(theme.selection), 2000);
               }
               setHighlightSentenceIndex(null);
@@ -258,6 +293,8 @@ function App() {
 
   const handleMergeVocabulary = (newItems: SavedItem[]) => {
       let addedCount = 0;
+      const newItemsToAdd: SavedItem[] = [];
+
       setSavedItems(prev => {
           const currentMap = new Map(prev.map(i => [i.original.toLowerCase(), i]));
           const merged = [...prev];
@@ -266,12 +303,21 @@ function App() {
               if (item.type === 'word' && !currentMap.has(item.original.toLowerCase())) {
                   const newItem = { ...item, id: Date.now().toString() + Math.random().toString().slice(2,5) };
                   merged.push(newItem);
+                  newItemsToAdd.push(newItem); // Track for server sync
                   currentMap.set(newItem.original.toLowerCase(), newItem);
                   addedCount++;
               }
           });
           return merged;
       });
+
+      // Sync merge to server if enabled
+      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+          newItemsToAdd.forEach(item => {
+              api.saveItem(settings.serverUrl, item).catch(e => console.error("Sync merge failed", e));
+          });
+      }
+
       setToast(`Successfully imported ${addedCount} new words!`);
   };
 
@@ -310,7 +356,15 @@ function App() {
                 }
 
                 const updatedArticle = { ...activeArticle, sentences: newSentences };
+                
+                // Update State
                 setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
+                
+                // Update Server
+                if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+                    await api.saveArticle(settings.serverUrl, updatedArticle);
+                }
+
                 setToast("Translation complete!");
             } catch (err) {
                 console.error("Translation failed", err);
@@ -381,11 +435,10 @@ function App() {
     setError(null);
   };
 
-  // Helper to fetch data either from Local, AI, or Custom API
   const fetchCardData = async (word: string, context?: string): Promise<WordCardData> => {
       console.log("Fetching card data for:", word);
 
-      // 1. Check Local "SavedItems"
+      // 1. Check Local "SavedItems" (Fastest)
       const cachedItem = savedItems.find(i => 
           i.type === 'word' && i.original.trim().toLowerCase() === word.trim().toLowerCase()
       );
@@ -400,7 +453,7 @@ function App() {
           throw new Error(`"${word}" not found in collection. Switch to AI mode to generate.`);
       }
 
-      // 3. Custom API Mode (New Logic)
+      // 3. Custom API Mode
       if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig?.url) {
           try {
               return await fetchFromCustomApi(word, settings.customApiConfig);
@@ -411,6 +464,7 @@ function App() {
       }
 
       // 4. AI / Network Generation (Gemini)
+      // Works in 'ai' mode AND 'server' mode (server mode saves the result later)
       return await generateWordCard(word, context, settings);
   };
 
@@ -449,7 +503,12 @@ function App() {
                  translation 
              };
              const updatedArticle = { ...activeArticle, sentences: updatedSentences };
+             
              setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
+             
+             if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+                 await api.saveArticle(settings.serverUrl, updatedArticle);
+             }
         }
       }
     } catch (err: any) {
@@ -489,7 +548,7 @@ function App() {
      }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const currentCard = topCard;
     if (!currentCard && !selectedText) return;
     if (!activeArticle) return;
@@ -517,13 +576,33 @@ function App() {
 
     setSavedItems(prev => [newItem, ...prev]);
     addToHistory('ADD', textToSave, newItem.type);
+    
+    // Save to Server if enabled
+    if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+        try {
+            await api.saveItem(settings.serverUrl, newItem);
+        } catch (err) {
+            console.error("Failed to save to server", err);
+            setToast("Saved locally, but server sync failed.");
+            return;
+        }
+    }
+    
     setToast("Added to your collection!");
   };
 
-  const removeSavedItem = (id: string) => {
+  const removeSavedItem = async (id: string) => {
     const item = savedItems.find(i => i.id === id);
     if (item) addToHistory('REMOVE', item.original, item.type);
     setSavedItems(prev => prev.filter(item => item.id !== id));
+
+    if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+        try {
+            await api.deleteItem(settings.serverUrl, id);
+        } catch(e) {
+            console.error("Failed to delete from server", e);
+        }
+    }
   };
 
   const handleJumpToContext = (articleId: string, sentenceIndex: number) => {
@@ -533,17 +612,25 @@ function App() {
       setIsSidebarOpen(false);
   };
 
-  const handleImportArticle = (article: Article) => {
+  const handleImportArticle = async (article: Article) => {
       setArticles(prev => [article, ...prev]);
       setActiveArticleId(article.id);
       setViewMode(ViewMode.READ);
       setToast("Article imported successfully!");
+      
+      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+          await api.saveArticle(settings.serverUrl, article);
+      }
   };
 
-  const handleDeleteArticle = (id: string) => {
+  const handleDeleteArticle = async (id: string) => {
       setArticles(prev => prev.filter(a => a.id !== id));
       if (activeArticleId === id) {
           setActiveArticleId(articles.length > 1 ? articles[0].id : null);
+      }
+
+      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+          await api.deleteArticle(settings.serverUrl, id);
       }
   };
 
@@ -845,16 +932,23 @@ function App() {
                                     setSavedItems(prevItems => {
                                         const exists = prevItems.some(i => i.type === 'word' && i.original.toLowerCase() === newData.word.toLowerCase());
                                         if (!exists) return prevItems;
-                                        return prevItems.map(item => {
+                                        
+                                        const updatedItems = prevItems.map(item => {
                                             if (item.type === 'word' && item.original.toLowerCase() === newData.word.toLowerCase()) {
-                                                return {
+                                                const updatedItem = {
                                                     ...item,
                                                     translation: newData.translation,
                                                     cardData: newData
                                                 };
+                                                // Sync update to server if enabled
+                                                if(settings.dataSourceMode === 'server' && settings.serverUrl) {
+                                                    api.saveItem(settings.serverUrl, updatedItem).catch(console.error);
+                                                }
+                                                return updatedItem;
                                             }
                                             return item;
                                         });
+                                        return updatedItems;
                                     });
                                 }}
                                 isSaved={savedItems.some(i => i.original.toLowerCase() === topCard.word.toLowerCase())}

@@ -80,7 +80,7 @@ export interface WordUsageData {
 
 export type WordStatsMap = Record<string, WordUsageData>;
 
-export type DataSourceMode = 'ai' | 'local_only' | 'custom_api';
+export type DataSourceMode = 'ai' | 'local_only' | 'custom_api' | 'server';
 export type Theme = 'light' | 'dark' | 'sepia' | 'forest' | 'amethyst';
 
 export interface CustomApiConfig {
@@ -96,6 +96,9 @@ export interface AppSettings {
   customApiKey?: string; // Optional user override
   dataSourceMode: DataSourceMode; // Preference for fetching data
   
+  // Backend Server Config
+  serverUrl?: string; // e.g. "http://localhost:5000"
+
   // Custom API Advanced Config
   customApiConfig?: CustomApiConfig;
   
