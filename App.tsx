@@ -119,19 +119,23 @@ function App() {
   // Data Loading Effect
   useEffect(() => {
     const loadData = async () => {
+        // Load local data as fallback/baseline
         const savedItemsLocal = JSON.parse(localStorage.getItem('english_reader_saved_items') || '[]');
         const articlesLocal = JSON.parse(localStorage.getItem('english_reader_articles') || '[]');
         const historyLocal = JSON.parse(localStorage.getItem('english_reader_history_records') || '[]');
         const statsLocal = JSON.parse(localStorage.getItem('english_reader_word_stats') || '{}');
         const sessionsLocal = JSON.parse(localStorage.getItem('english_reader_sessions') || '[]');
 
-        // Check useServerStorage instead of dataSourceMode
+        // Only attempt server fetch if useServerStorage is TRUE
         if (settings.useServerStorage && settings.serverUrl) {
             try {
+                // Try to connect to backend
                 const [serverArticles, serverItems] = await Promise.all([
                     api.getArticles(settings.serverUrl),
                     api.getSavedItems(settings.serverUrl)
                 ]);
+                
+                // If successful, use server data
                 setArticles(serverArticles);
                 setSavedItems(serverItems);
                 
@@ -143,12 +147,17 @@ function App() {
                 if (serverArticles.length > 0 && !activeArticleId) {
                     setActiveArticleId(serverArticles[0].id);
                 } else if (serverArticles.length === 0) {
-                    createDefaultArticle();
+                    // Only create default if local is also empty or we want to ensure some content
+                     if (articlesLocal.length === 0) createDefaultArticle();
                 }
             } catch (err) {
                 console.error("Server Connection Failed", err);
-                setToast("Server Connection Failed. Using Local Data.");
-                // Fallback to local
+                
+                // CRITICAL FIX: Automatically disable server storage if unreachable to prevent "Failed to fetch" loops
+                setToast("Server unreachable. Disabling Server Sync.");
+                setSettings(prev => ({ ...prev, useServerStorage: false }));
+                
+                // Fallback to local data immediately
                 setArticles(articlesLocal);
                 setSavedItems(savedItemsLocal);
                 setHistoryRecords(historyLocal);
@@ -157,6 +166,7 @@ function App() {
                 if (articlesLocal.length === 0) createDefaultArticle();
             }
         } else {
+            // Local Mode
             setArticles(articlesLocal);
             setSavedItems(savedItemsLocal);
             setHistoryRecords(historyLocal);
