@@ -1,6 +1,6 @@
 
-import React, { useEffect, useState } from 'react';
-import { ClockIcon, ChartBarIcon, SparklesIcon, BookOpenIcon, ArrowLeftIcon } from './Icons';
+import React, { useEffect, useState, useRef } from 'react';
+import { ClockIcon, ChartBarIcon, SparklesIcon, BookOpenIcon, ArrowLeftIcon, MoveIcon } from './Icons';
 import { ReadingSession } from '../types';
 
 interface ReadingDashboardProps {
@@ -23,6 +23,13 @@ export const ReadingDashboard: React.FC<ReadingDashboardProps> = ({
     const [showHistory, setShowHistory] = useState(false);
     // On mobile, start collapsed (minimized)
     const [isMinimized, setIsMinimized] = useState(false);
+
+    // Draggable State
+    const [position, setPosition] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+    const dashboardRef = useRef<HTMLDivElement>(null);
+    const hasMovedRef = useRef(false); // Track if drag actually happened
 
     // Auto-minimize on mobile on mount
     useEffect(() => {
@@ -62,14 +69,83 @@ export const ReadingDashboard: React.FC<ReadingDashboardProps> = ({
 
     const totalHistorySeconds = sessions.reduce((acc, s) => acc + s.durationSeconds, 0);
 
+    // Drag Logic
+    const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+        // Prevent default only if it's not a button click
+        // e.preventDefault(); 
+        
+        const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+        setIsDragging(true);
+        hasMovedRef.current = false;
+        
+        // Calculate offset relative to current transform position
+        setDragOffset({
+            x: clientX - position.x,
+            y: clientY - position.y
+        });
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent | TouchEvent) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            hasMovedRef.current = true;
+
+            const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+            const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
+
+            setPosition({
+                x: clientX - dragOffset.x,
+                y: clientY - dragOffset.y
+            });
+        };
+
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+
+        if (isDragging) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+            window.addEventListener('touchmove', handleMouseMove, { passive: false });
+            window.addEventListener('touchend', handleMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+            window.removeEventListener('touchmove', handleMouseMove);
+            window.removeEventListener('touchend', handleMouseUp);
+        };
+    }, [isDragging, dragOffset]);
+
+    // Handle clicks that might be drags
+    const handleContainerClick = (e: React.MouseEvent) => {
+        if (hasMovedRef.current) {
+            e.stopPropagation();
+            return; // It was a drag, not a click
+        }
+    };
+
     // Minimized View (Mobile friendly pill)
     if (isMinimized) {
         return (
             <div 
-                className="fixed right-4 top-20 z-30 animate-fade-in cursor-pointer group"
-                onClick={() => setIsMinimized(false)}
+                ref={dashboardRef}
+                className="fixed right-4 top-20 z-30 animate-fade-in cursor-move touch-none"
+                style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+                onMouseDown={handleMouseDown}
+                onTouchStart={handleMouseDown}
+                onClick={handleContainerClick}
             >
-                <div className="bg-white/90 backdrop-blur-md border border-slate-200 shadow-lg rounded-full px-3 py-1.5 flex items-center gap-3 hover:scale-105 transition-transform">
+                <div 
+                    className="bg-white/90 backdrop-blur-md border border-slate-200 shadow-lg rounded-full px-3 py-1.5 flex items-center gap-3 hover:scale-105 transition-transform"
+                    onClick={(e) => {
+                        if (!hasMovedRef.current) setIsMinimized(false);
+                    }}
+                >
                     <div className="flex items-center gap-1.5">
                         <ClockIcon className="w-3.5 h-3.5 text-indigo-500" />
                         <span className="text-xs font-mono font-bold text-slate-700">
@@ -85,14 +161,29 @@ export const ReadingDashboard: React.FC<ReadingDashboardProps> = ({
 
     // Expanded View
     return (
-        <div className="fixed right-4 top-20 z-30 flex flex-col gap-4 animate-fade-in transition-all items-end">
+        <div 
+            ref={dashboardRef}
+            className="fixed right-4 top-20 z-30 flex flex-col gap-4 animate-fade-in transition-all items-end"
+            style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+        >
             {/* Main Dashboard */}
-            <div className="bg-white/90 backdrop-blur-md border border-slate-200 p-5 rounded-2xl shadow-xl w-56 text-slate-800 transition-all hover:shadow-2xl hover:bg-white/95 group relative">
+            <div 
+                className="bg-white/90 backdrop-blur-md border border-slate-200 p-5 rounded-2xl shadow-xl w-56 text-slate-800 transition-all hover:shadow-2xl hover:bg-white/95 group relative"
+            >
+                {/* Drag Handle Area */}
+                <div 
+                    className="absolute top-0 left-0 right-8 h-8 cursor-move touch-none z-10 flex justify-center pt-1"
+                    onMouseDown={handleMouseDown}
+                    onTouchStart={handleMouseDown}
+                    title="Drag to move"
+                >
+                     <div className="w-8 h-1 bg-slate-200 rounded-full"></div>
+                </div>
                 
                 {/* Close/Minimize Button */}
                 <button 
                     onClick={(e) => { e.stopPropagation(); setIsMinimized(true); }}
-                    className="absolute top-2 right-2 p-1 text-slate-300 hover:text-slate-500 rounded-full hover:bg-slate-100 transition-colors"
+                    className="absolute top-2 right-2 p-1 text-slate-300 hover:text-slate-500 rounded-full hover:bg-slate-100 transition-colors z-20"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                         <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
@@ -100,7 +191,7 @@ export const ReadingDashboard: React.FC<ReadingDashboardProps> = ({
                 </button>
 
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+                <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2 mt-2">
                     <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></div>
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-500">当前会话</span>

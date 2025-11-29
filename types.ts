@@ -121,6 +121,7 @@ export interface AppSettings {
   theme: Theme;
   customThemeColors?: CustomThemeColors; // User defined colors
   fontSize: number; // Base font size in px
+  lineHeight: number; // Line height multiplier (e.g., 1.6)
   layoutMode: LayoutMode; // 'inline' or 'split'
   
   // Backend Server Config

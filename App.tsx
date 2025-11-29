@@ -13,7 +13,7 @@ import { ArticleLibrary } from './components/ArticleLibrary';
 import { SettingsView } from './components/SettingsView';
 import { ReadingDashboard } from './components/ReadingDashboard'; 
 import { processTextToArticle, countWordStats } from './utils/textHelpers';
-import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon, ArrowLeftIcon } from './components/Icons';
+import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon, ArrowLeftIcon, LineHeightIcon } from './components/Icons';
 
 const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in scientific discovery. Many breakthrough inventions were not the result of rigorous planning, but rather happy accidents that occurred while researchers were looking for something else. For instance, penicillin was discovered when Alexander Fleming returned from a holiday to find that mold had killed bacteria in a petri dish he had left uncovered. This illustrates that while method is important, maintaining an open mind to the unexpected is equally vital for progress.`;
 
@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     theme: 'light',
     serverUrl: 'http://localhost:5000',
     fontSize: 18,
+    lineHeight: 1.6,
     layoutMode: 'inline',
     customThemeColors: {
         appBg: '#ffffff',
@@ -335,7 +336,7 @@ function App() {
         window.removeEventListener('resize', handleScroll);
         clearTimeout(timer);
     };
-  }, [activeArticle, viewMode, showTranslation, settings.fontSize, settings.layoutMode]); 
+  }, [activeArticle, viewMode, showTranslation, settings.fontSize, settings.lineHeight, settings.layoutMode]); 
 
   // Session Tracking Logic
   useEffect(() => {
@@ -807,6 +808,18 @@ function App() {
       }));
   };
 
+  // Change Line Height
+  const changeLineHeight = (delta: number) => {
+      setSettings(prev => {
+          const current = prev.lineHeight || 1.6;
+          const newVal = Math.max(1.2, Math.min(2.4, current + delta));
+          return {
+              ...prev,
+              lineHeight: Number(newVal.toFixed(1))
+          };
+      });
+  };
+
   const renderInteractiveToken = (token: string, sentence: Sentence, tIdx: number) => {
       const isWord = /^[a-zA-Z0-9_'-]+$/.test(token);
       if (isWord) {
@@ -930,8 +943,8 @@ function App() {
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {viewMode === ViewMode.READ && (
                 <>  
-                    {/* Appearance Controls */}
-                    <div className="flex items-center bg-black/5 rounded-lg mr-2 p-1 hidden md:flex">
+                    {/* Font Size Controls */}
+                    <div className="flex items-center bg-black/5 rounded-lg mr-1 p-1 hidden md:flex">
                         <button 
                             onClick={() => changeFontSize(-1)}
                             className="p-1 hover:bg-white/50 rounded text-xs font-bold w-6 h-6 flex items-center justify-center transition-colors"
@@ -946,6 +959,25 @@ function App() {
                             title="Increase Font Size"
                         >
                             A+
+                        </button>
+                    </div>
+
+                    {/* Line Height Controls */}
+                    <div className="flex items-center bg-black/5 rounded-lg mr-2 p-1 hidden lg:flex">
+                        <button 
+                            onClick={() => changeLineHeight(-0.2)}
+                            className="p-1 hover:bg-white/50 rounded text-xs font-bold w-6 h-6 flex items-center justify-center transition-colors"
+                            title="Decrease Line Spacing"
+                        >
+                            -
+                        </button>
+                        <LineHeightIcon className="w-4 h-4 mx-1 opacity-50" />
+                        <button 
+                            onClick={() => changeLineHeight(0.2)}
+                            className="p-1 hover:bg-white/50 rounded text-xs font-bold w-6 h-6 flex items-center justify-center transition-colors"
+                            title="Increase Line Spacing"
+                        >
+                            +
                         </button>
                     </div>
 
@@ -1124,8 +1156,11 @@ function App() {
                                 </div>
                             ) : (
                                 <div 
-                                    className={`reader-text leading-loose`} 
-                                    style={{ fontSize: `${settings.fontSize}px` }}
+                                    className={`reader-text`} 
+                                    style={{ 
+                                        fontSize: `${settings.fontSize}px`,
+                                        lineHeight: settings.lineHeight || 1.6
+                                    }}
                                 >
                                     <div className="mb-8 border-b border-dashed border-current/10 pb-6">
                                         <h2 className="text-4xl font-bold font-serif mb-2 tracking-tight">{activeArticle.title}</h2>
