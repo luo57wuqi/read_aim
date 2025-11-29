@@ -402,7 +402,8 @@ function App() {
 
   // --- Logic ---
 
-  const handleImportData = (data: BackupData) => {
+  const handleImportData = async (data: BackupData) => {
+      // 1. Update Local State (Immediate Feedback)
       setArticles(data.articles);
       setSavedItems(data.savedItems);
       setHistoryRecords(data.historyRecords);
@@ -411,7 +412,19 @@ function App() {
       setReadingSessions(data.sessions || []);
       
       if (data.articles.length > 0) setActiveArticleId(data.articles[0].id);
-      setToast("Data restored successfully!");
+      setToast("Data restored locally!");
+
+      // 2. Sync to Server if enabled
+      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+          setToast("Syncing backup to server database... (Do not close)");
+          try {
+              await api.restoreBackup(settings.serverUrl, data);
+              setToast("Server Sync Complete! All data uploaded.");
+          } catch (e) {
+              console.error("Server sync failed", e);
+              setError("Local restore ok, but Server Sync failed.");
+          }
+      }
   };
 
   const handleMergeVocabulary = (newItems: SavedItem[]) => {
