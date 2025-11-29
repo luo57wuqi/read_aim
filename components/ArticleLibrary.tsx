@@ -1,21 +1,23 @@
 
 import React, { useState, useMemo } from 'react';
 import { Article } from '../types';
-import { BookOpenIcon, PlusIcon, TrashIcon, CheckCircleIcon, PencilIcon, GlobeAltIcon, LinkIcon, ArrowLeftIcon, ListBulletIcon } from './Icons';
+import { BookOpenIcon, PlusIcon, TrashIcon, CheckCircleIcon, PencilIcon, GlobeAltIcon, LinkIcon, ArrowLeftIcon, ListBulletIcon, SparklesIcon } from './Icons';
 import { processTextToArticle, extractContentFromUrl, splitContentIntoChapters } from '../utils/textHelpers';
 
 interface ArticleLibraryProps {
   articles: Article[];
   onSelectArticle: (articleId: string) => void;
-  onImportArticle: (article: Article) => void;
+  onImportArticle: (article: Article, autoTranslate?: boolean) => void;
   onDeleteArticle: (articleId: string) => void;
+  onDeleteGroup?: (groupId: string) => void;
 }
 
 export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({ 
   articles, 
   onSelectArticle, 
   onImportArticle, 
-  onDeleteArticle 
+  onDeleteArticle,
+  onDeleteGroup
 }) => {
   const [isImporting, setIsImporting] = useState(false);
   const [importType, setImportType] = useState<'text' | 'url'>('text');
@@ -23,6 +25,7 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [importTitle, setImportTitle] = useState('');
+  const [autoTranslate, setAutoTranslate] = useState(false);
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
 
   // Group Navigation State
@@ -105,13 +108,18 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
             groupId: newGroupId,
             groupTitle: baseTitle
         };
-        onImportArticle(newArticle);
+        // Pass autoTranslate flag only for the first chapter or all? 
+        // Logic: if we want to translate the whole book, we should trigger it for all.
+        // But App.tsx handles one at a time via state change. 
+        // For simplicity, we trigger it for every chapter. The App component should queue or handle it.
+        onImportArticle(newArticle, autoTranslate);
     });
     
     // Reset
     setImportText('');
     setImportUrl('');
     setImportTitle('');
+    setAutoTranslate(false);
     setIsImporting(false);
   };
 
@@ -149,7 +157,7 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
           {!activeGroupId && (
               <button 
                 onClick={() => setIsImporting(true)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-transform active:scale-95"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-transform active:scale-95 w-full sm:w-auto justify-center"
               >
                 <PlusIcon className="w-5 h-5" />
                 Add Content
@@ -159,23 +167,23 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
 
         {/* Import Modal */}
         {isImporting && (
-          <div className="mb-10 bg-white p-8 rounded-2xl shadow-xl border border-indigo-100 animate-slide-in-right relative z-20">
+          <div className="mb-10 bg-white p-4 sm:p-8 rounded-2xl shadow-xl border border-indigo-100 animate-slide-in-right relative z-20">
              <button onClick={() => setIsImporting(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 p-2">✕</button>
-            <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
+            <h3 className="font-bold text-lg sm:text-xl text-slate-800 mb-6 flex items-center gap-2">
                 <PencilIcon className="w-6 h-6 text-indigo-500" />
                 Import New Article
             </h3>
             
-            <div className="flex gap-2 mb-6 border-b border-slate-100 pb-1">
+            <div className="flex gap-2 mb-6 border-b border-slate-100 pb-1 overflow-x-auto">
                 <button 
                     onClick={() => setImportType('text')}
-                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 ${importType === 'text' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 whitespace-nowrap ${importType === 'text' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                 >
                     <PencilIcon className="w-4 h-4" /> Text Paste
                 </button>
                 <button 
                     onClick={() => setImportType('url')}
-                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 ${importType === 'url' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 whitespace-nowrap ${importType === 'url' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                 >
                     <GlobeAltIcon className="w-4 h-4" /> Import from URL
                 </button>
@@ -200,23 +208,23 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
                         placeholder="Paste text here... Long articles will be automatically split into multiple chapters and grouped."
                         value={importText}
                         onChange={(e) => setImportText(e.target.value)}
-                        className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none min-h-[240px] font-serif text-lg leading-relaxed text-slate-700 resize-y"
+                        className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none min-h-[200px] sm:min-h-[240px] font-serif text-base sm:text-lg leading-relaxed text-slate-700 resize-y"
                       />
                   </div>
               ) : (
                   <div>
                       <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Article URL</label>
                       <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
-                          <LinkIcon className="w-5 h-5 text-slate-400" />
+                          <LinkIcon className="w-5 h-5 text-slate-400 shrink-0" />
                           <input
                             type="text"
                             placeholder="https://..."
                             value={importUrl}
                             onChange={(e) => setImportUrl(e.target.value)}
-                            className="w-full bg-transparent outline-none text-sm font-mono text-slate-600"
+                            className="w-full bg-transparent outline-none text-sm font-mono text-slate-600 min-w-0"
                           />
                       </div>
-                      <div className="flex justify-between items-start mt-2">
+                      <div className="flex flex-col sm:flex-row justify-between items-start mt-2 gap-2">
                         <p className="text-[11px] text-slate-400">
                             Powered by <a href="https://jina.ai/reader" target="_blank" className="underline hover:text-indigo-500">Jina Reader</a>.
                         </p>
@@ -224,6 +232,26 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
                       </div>
                   </div>
               )}
+
+              {/* Auto Translate Checkbox */}
+              <div className="flex items-start sm:items-center gap-3 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100">
+                  <div className="relative flex items-center h-5">
+                      <input 
+                          type="checkbox" 
+                          id="autoTranslate" 
+                          checked={autoTranslate} 
+                          onChange={e => setAutoTranslate(e.target.checked)}
+                          className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      />
+                  </div>
+                  <label htmlFor="autoTranslate" className="text-sm text-slate-700 font-medium cursor-pointer select-none flex-1">
+                      <span className="flex items-center gap-2">
+                          <SparklesIcon className="w-4 h-4 text-indigo-500" />
+                          <span>Auto-translate to Chinese immediately</span>
+                      </span>
+                      <p className="text-xs text-slate-400 font-normal mt-0.5">Automatically generates translations for a bilingual reading experience.</p>
+                  </label>
+              </div>
 
               <div className="flex gap-3 justify-end pt-4">
                 <button 
@@ -269,8 +297,24 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
                     className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group relative flex flex-col h-[280px] overflow-hidden"
                     onClick={() => setActiveGroupId(groupId)}
                 >
+                    {/* Delete Group Button (Top Right) */}
+                    <div className="absolute top-3 right-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if(confirm(`Delete entire group "${coverArticle.groupTitle}" (${group.length} chapters)?`)) {
+                                    if(onDeleteGroup) onDeleteGroup(groupId);
+                                }
+                            }}
+                            className="p-2 bg-white/80 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-full shadow-sm backdrop-blur-sm transition-colors border border-slate-100"
+                            title="Delete Collection"
+                        >
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                    </div>
+
                     {/* Folder Stack Effect */}
-                    <div className="absolute top-0 right-0 p-4 z-10">
+                    <div className="absolute top-0 right-0 p-4 z-10 pointer-events-none">
                         <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
                             {group.length} Chapters
                         </span>

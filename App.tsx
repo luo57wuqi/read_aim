@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { App as CapApp } from '@capacitor/app'; // For hardware back button
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
 import { fetchFromCustomApi, translateWithCustomApi, translateBatchWithCustomApi } from './services/customApiService';
 import { api } from './services/backendService';
 import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData, ReadingSession } from './types';
 import { Sidebar } from './components/Sidebar';
-import { LeftSidebar } from './components/LeftSidebar'; // Import LeftSidebar
+import { LeftSidebar } from './components/LeftSidebar';
 import { VocabularyCard } from './components/VocabularyCard';
 import { DraggableSheet } from './components/DraggableSheet';
 import { StatsView } from './components/StatsView';
@@ -13,7 +14,7 @@ import { ArticleLibrary } from './components/ArticleLibrary';
 import { SettingsView } from './components/SettingsView';
 import { ReadingDashboard } from './components/ReadingDashboard'; 
 import { processTextToArticle, countWordStats } from './utils/textHelpers';
-import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon, ArrowLeftIcon, LineHeightIcon } from './components/Icons';
+import { BookOpenIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ArrowLeftIcon, LineHeightIcon } from './components/Icons';
 
 const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in scientific discovery. Many breakthrough inventions were not the result of rigorous planning, but rather happy accidents that occurred while researchers were looking for something else. For instance, penicillin was discovered when Alexander Fleming returned from a holiday to find that mold had killed bacteria in a petri dish he had left uncovered. This illustrates that while method is important, maintaining an open mind to the unexpected is equally vital for progress.`;
 
@@ -104,10 +105,41 @@ function App() {
     }
   }, []);
 
-  // Data Loading Effect (Handles Local vs Server)
+  // Hardware Back Button Handler (Mobile)
+  useEffect(() => {
+      const handleBackButton = async () => {
+          CapApp.addListener('backButton', ({ canGoBack }) => {
+              if (isSettingsOpen) {
+                  setIsSettingsOpen(false);
+              } else if (wordCardStack.length > 0) {
+                  setWordCardStack(prev => prev.slice(0, -1));
+              } else if (activeTranslation) {
+                  setActiveTranslation(null);
+                  setSelectedText(null);
+              } else if (isSidebarOpen) {
+                  setIsSidebarOpen(false);
+              } else if (isLeftSidebarOpen) {
+                  setIsLeftSidebarOpen(false);
+              } else if (viewMode !== ViewMode.READ) {
+                  setViewMode(ViewMode.READ);
+              } else {
+                  // If on main screen, let system handle it (minimize or exit)
+                  if (!canGoBack) {
+                      CapApp.exitApp();
+                  }
+              }
+          });
+      };
+      handleBackButton();
+      
+      return () => {
+          CapApp.removeAllListeners();
+      };
+  }, [isSettingsOpen, wordCardStack, activeTranslation, isSidebarOpen, isLeftSidebarOpen, viewMode]);
+
+  // Data Loading Effect
   useEffect(() => {
     const loadData = async () => {
-        // 1. Load LocalStorage (Always load as fallback or base)
         const savedItemsLocal = JSON.parse(localStorage.getItem('english_reader_saved_items') || '[]');
         const articlesLocal = JSON.parse(localStorage.getItem('english_reader_articles') || '[]');
         const historyLocal = JSON.parse(localStorage.getItem('english_reader_history_records') || '[]');
@@ -116,16 +148,12 @@ function App() {
 
         if (settings.dataSourceMode === 'server' && settings.serverUrl) {
             try {
-                // Server Mode: Fetch from Python Backend
                 const [serverArticles, serverItems] = await Promise.all([
                     api.getArticles(settings.serverUrl),
                     api.getSavedItems(settings.serverUrl)
                 ]);
-                
                 setArticles(serverArticles);
                 setSavedItems(serverItems);
-                
-                // Note: History and Stats are currently still local-only for simplicity in this iteration
                 setHistoryRecords(historyLocal);
                 setWordStats(statsLocal);
                 setReadingSessions(sessionsLocal);
@@ -136,7 +164,7 @@ function App() {
                     createDefaultArticle();
                 }
             } catch (err) {
-                console.error("Server Sync Failed, falling back to local", err);
+                console.error("Server Sync Failed", err);
                 setToast("Server Connection Failed. Using Local Data.");
                 setArticles(articlesLocal);
                 setSavedItems(savedItemsLocal);
@@ -146,7 +174,6 @@ function App() {
                 if (articlesLocal.length === 0) createDefaultArticle();
             }
         } else {
-            // Local Mode
             setArticles(articlesLocal);
             setSavedItems(savedItemsLocal);
             setHistoryRecords(historyLocal);
@@ -155,11 +182,10 @@ function App() {
             if (articlesLocal.length === 0) createDefaultArticle();
         }
     };
-
     loadData();
   }, [settings.dataSourceMode, settings.serverUrl]); 
 
-  // Persist State (Handles Local vs Server Saving)
+  // Persist State
   useEffect(() => {
       localStorage.setItem('english_reader_saved_items', JSON.stringify(savedItems));
       localStorage.setItem('english_reader_articles', JSON.stringify(articles));
@@ -182,17 +208,14 @@ function App() {
       setActiveArticleId(defaultArticle.id);
   };
 
-  // --- Derived State ---
   const activeArticle = articles.find(a => a.id === activeArticleId);
   const topCard = wordCardStack.length > 0 ? wordCardStack[wordCardStack.length - 1] : null;
   const previousCard = wordCardStack.length > 1 ? wordCardStack[wordCardStack.length - 2] : null;
   
-  // Filter sessions for the current article
   const currentArticleSessions = readingSessions
     .filter(s => s.articleId === activeArticleId)
-    .sort((a, b) => b.startTime - a.startTime); // Newest first
+    .sort((a, b) => b.startTime - a.startTime);
 
-  // Group Articles Logic (For Left Sidebar & Navigation)
   const groupData = useMemo(() => {
      if (!activeArticle) return { siblings: [], currentIndex: -1, prev: null, next: null };
      
@@ -212,12 +235,10 @@ function App() {
      return { siblings, currentIndex, prev, next };
   }, [activeArticle, articles, activeArticleId]);
 
-  // Article Stats
   const articleStats = activeArticle 
       ? countWordStats(activeArticle.sentences.map(s => s.text).join(' ')) 
       : { enCount: 0, cnCount: 0, readingTimeMin: 0 };
 
-  // --- Theme Engine ---
   const getThemePalette = () => {
       if (settings.theme === 'custom' && settings.customThemeColors) {
           return {
@@ -285,11 +306,11 @@ function App() {
           };
           case 'light': 
           default: return {
-              appBg: 'bg-[#f8f9fa]', // More refined light grey
-              text: 'text-[#2d333b]', // Softer black
+              appBg: 'bg-[#f8f9fa]',
+              text: 'text-[#2d333b]',
               textMuted: 'text-[#8590a6]',
               headerBg: 'bg-white/90 border-slate-100',
-              paperBg: 'bg-white border-transparent', // Clean white paper
+              paperBg: 'bg-white border-transparent',
               shadow: 'shadow-[0_8px_30px_rgb(0,0,0,0.04)]',
               accent: 'text-indigo-600',
               highlight: 'bg-indigo-50 text-indigo-900',
@@ -300,8 +321,6 @@ function App() {
   };
   
   const theme = getThemePalette();
-
-  // Custom CSS vars for dynamic theme
   const customStyle = theme.isCustom ? {
       backgroundColor: settings.customThemeColors?.appBg,
       color: settings.customThemeColors?.text,
@@ -309,7 +328,6 @@ function App() {
 
   // --- Effects ---
 
-  // Handle Scroll / Progress AND Track Max Progress
   const handleScroll = () => {
     const element = containerRef.current;
     if (!element) return;
@@ -323,7 +341,6 @@ function App() {
     const currentProg = Math.min(100, Math.max(0, (scrollTop / totalScroll) * 100));
     setReadingProgress(currentProg);
     
-    // Update max progress for current session
     if (currentProg > sessionMaxProgressRef.current) {
         sessionMaxProgressRef.current = currentProg;
     }
@@ -338,14 +355,11 @@ function App() {
     };
   }, [activeArticle, viewMode, showTranslation, settings.fontSize, settings.lineHeight, settings.layoutMode]); 
 
-  // Session Tracking Logic
+  // Session Tracking
   useEffect(() => {
-      // 1. End previous session if exists
       if (previousArticleIdRef.current) {
           const endTime = Date.now();
           const duration = (endTime - sessionStartTimeRef.current) / 1000;
-          
-          // Only log if duration > 10 seconds to avoid noise
           if (duration > 10) { 
               const prevArticle = articles.find(a => a.id === previousArticleIdRef.current);
               if (prevArticle) {
@@ -363,21 +377,17 @@ function App() {
           }
       }
 
-      // 2. Start new session
       if (activeArticleId && viewMode === ViewMode.READ) {
           sessionStartTimeRef.current = Date.now();
           sessionMaxProgressRef.current = 0;
           previousArticleIdRef.current = activeArticleId;
-          setReadingProgress(0); // Reset UI progress
-          // Scroll to top when article changes
+          setReadingProgress(0);
           if (containerRef.current) containerRef.current.scrollTop = 0;
       } else {
-          // If leaving read mode, end session
           previousArticleIdRef.current = null;
       }
-  }, [activeArticleId, viewMode]); // Added viewMode to dep to stop session when going to Library/Stats
+  }, [activeArticleId, viewMode]);
 
-  // Auto-scroll to highlight sentence
   useEffect(() => {
       if (highlightSentenceIndex !== null && viewMode === ViewMode.READ && activeArticleId) {
           setTimeout(() => {
@@ -392,7 +402,6 @@ function App() {
       }
   }, [highlightSentenceIndex, viewMode, activeArticleId, theme]);
 
-  // Toast Timer
   useEffect(() => {
      if (toast) {
          const timer = setTimeout(() => setToast(null), 3000);
@@ -403,7 +412,6 @@ function App() {
   // --- Logic ---
 
   const handleImportData = async (data: BackupData) => {
-      // 1. Update Local State (Immediate Feedback)
       setArticles(data.articles);
       setSavedItems(data.savedItems);
       setHistoryRecords(data.historyRecords);
@@ -414,12 +422,11 @@ function App() {
       if (data.articles.length > 0) setActiveArticleId(data.articles[0].id);
       setToast("Data restored locally!");
 
-      // 2. Sync to Server if enabled
       if (settings.dataSourceMode === 'server' && settings.serverUrl) {
-          setToast("Syncing backup to server database... (Do not close)");
+          setToast("Syncing backup to server database...");
           try {
               await api.restoreBackup(settings.serverUrl, data);
-              setToast("Server Sync Complete! All data uploaded.");
+              setToast("Server Sync Complete!");
           } catch (e) {
               console.error("Server sync failed", e);
               setError("Local restore ok, but Server Sync failed.");
@@ -439,7 +446,7 @@ function App() {
               if (item.type === 'word' && !currentMap.has(item.original.toLowerCase())) {
                   const newItem = { ...item, id: Date.now().toString() + Math.random().toString().slice(2,5) };
                   merged.push(newItem);
-                  newItemsToAdd.push(newItem); // Track for server sync
+                  newItemsToAdd.push(newItem);
                   currentMap.set(newItem.original.toLowerCase(), newItem);
                   addedCount++;
               }
@@ -456,79 +463,79 @@ function App() {
       setToast(`Successfully imported ${addedCount} new words!`);
   };
 
-  const toggleTranslation = async () => {
+  const executeArticleTranslation = async (targetArticle: Article) => {
+    if (isTranslatingArticle) return;
+    const needsTranslation = targetArticle.sentences.some(s => !s.translation);
+    if (!needsTranslation) {
+        setToast("Translations already exist.");
+        return;
+    }
+
+    setIsTranslatingArticle(true);
+    setToast(`Translating: ${targetArticle.title}...`);
     
+    try {
+        const BATCH_SIZE = 20;
+        const sentences = [...targetArticle.sentences];
+        const newSentences = [...sentences];
+
+        for (let i = 0; i < sentences.length; i += BATCH_SIZE) {
+            const chunk = sentences.slice(i, i + BATCH_SIZE);
+            const chunkIndices = chunk.map((s, idx) => ({ s, absIdx: i + idx })).filter(item => !item.s.translation);
+            
+            if (chunkIndices.length > 0) {
+                const textsToTranslate = chunkIndices.map(item => item.s.text);
+                let translations: string[] = [];
+                
+                if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig) {
+                    translations = await translateBatchWithCustomApi(textsToTranslate, settings.customApiConfig);
+                } else {
+                    translations = await translateBatch(textsToTranslate, settings);
+                }
+                
+                chunkIndices.forEach((item, idx) => {
+                   if (translations[idx]) {
+                       newSentences[item.absIdx] = {
+                           ...newSentences[item.absIdx],
+                           translation: translations[idx]
+                       };
+                   }
+                });
+            }
+        }
+
+        const updatedArticle = { ...targetArticle, sentences: newSentences };
+        setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
+        
+        if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+            await api.saveArticle(settings.serverUrl, updatedArticle);
+        }
+
+        setToast("Translation complete!");
+    } catch (err: any) {
+        console.error("Translation failed", err);
+        const errStr = err.toString();
+        const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+            setError("API Quota Exceeded (429). Switch to 'Custom API'.");
+        } else {
+            setError("Could not translate entire article. Try again later.");
+        }
+    } finally {
+        setIsTranslatingArticle(false);
+    }
+  };
+
+  const toggleTranslation = async () => {
     const nextState = !showTranslation;
     setShowTranslation(nextState);
-
-    // AUTO SWITCH LAYOUT
     setSettings(prev => ({
         ...prev,
         layoutMode: nextState ? 'split' : 'inline'
     }));
 
     if (nextState && activeArticle) {
-        const needsTranslation = activeArticle.sentences.some(s => !s.translation);
-        if (needsTranslation && !isTranslatingArticle) {
-            setIsTranslatingArticle(true);
-            setToast("Translating article...");
-            
-            try {
-                const BATCH_SIZE = 20;
-                const sentences = [...activeArticle.sentences];
-                const newSentences = [...sentences];
-
-                for (let i = 0; i < sentences.length; i += BATCH_SIZE) {
-                    const chunk = sentences.slice(i, i + BATCH_SIZE);
-                    const chunkIndices = chunk.map((s, idx) => ({ s, absIdx: i + idx })).filter(item => !item.s.translation);
-                    
-                    if (chunkIndices.length > 0) {
-                        const textsToTranslate = chunkIndices.map(item => item.s.text);
-                        let translations: string[] = [];
-                        
-                        // Switch between Custom API and Gemini
-                        if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig) {
-                            translations = await translateBatchWithCustomApi(textsToTranslate, settings.customApiConfig);
-                        } else {
-                            translations = await translateBatch(textsToTranslate, settings);
-                        }
-                        
-                        chunkIndices.forEach((item, idx) => {
-                           if (translations[idx]) {
-                               newSentences[item.absIdx] = {
-                                   ...newSentences[item.absIdx],
-                                   translation: translations[idx]
-                               };
-                           }
-                        });
-                    }
-                }
-
-                const updatedArticle = { ...activeArticle, sentences: newSentences };
-                
-                // Update State
-                setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
-                
-                // Update Server
-                if (settings.dataSourceMode === 'server' && settings.serverUrl) {
-                    await api.saveArticle(settings.serverUrl, updatedArticle);
-                }
-
-                setToast("Translation complete!");
-            } catch (err: any) {
-                console.error("Translation failed", err);
-                const errStr = err.toString();
-                const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('RESOURCE_EXHAUSTED');
-                
-                if (isQuota) {
-                    setError("API Quota Exceeded (429). Please switch to 'Custom API' in Settings.");
-                } else {
-                    setError("Could not translate entire article. Try again later.");
-                }
-            } finally {
-                setIsTranslatingArticle(false);
-            }
-        }
+        await executeArticleTranslation(activeArticle);
     }
   };
 
@@ -554,7 +561,6 @@ function App() {
   
   const addToHistory = (action: 'ADD' | 'REMOVE' | 'LOOKUP', original: string, type: 'word' | 'sentence') => {
       if (!activeArticle) return;
-
       const newRecord: HistoryRecord = {
           id: Date.now().toString() + Math.random().toString().slice(2,5),
           action,
@@ -566,7 +572,6 @@ function App() {
           sourceContextSentence: contextSentence,
           sourceSentenceIndex: selectedSentenceIndex
       };
-      
       setHistoryRecords(prev => [newRecord, ...prev]);
   };
 
@@ -595,15 +600,12 @@ function App() {
       const cachedItem = savedItems.find(i => 
           i.type === 'word' && i.original.trim().toLowerCase() === word.trim().toLowerCase()
       );
-      
       if (cachedItem && cachedItem.cardData) {
           return { ...cachedItem.cardData };
       }
-
       if (settings.dataSourceMode === 'local_only') {
           throw new Error(`"${word}" not found in collection. Switch to AI mode to generate.`);
       }
-
       if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig?.url) {
           try {
               return await fetchFromCustomApi(word, settings.customApiConfig);
@@ -612,7 +614,6 @@ function App() {
               throw new Error(e.message);
           }
       }
-
       return await generateWordCard(word, context, settings);
   };
 
@@ -634,7 +635,6 @@ function App() {
         setWordCardStack([cardData]); 
       } else {
         const existingTranslation = activeArticle.sentences[selectedSentenceIndex]?.translation;
-        
         if (existingTranslation) {
              setActiveTranslation(existingTranslation);
         } else {
@@ -643,7 +643,6 @@ function App() {
              }
              
              let translation = '';
-             // Switch between Custom API and Gemini for sentence translation
              if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig) {
                  translation = await translateWithCustomApi(selectedText, settings.customApiConfig);
              } else {
@@ -652,14 +651,12 @@ function App() {
 
              setActiveTranslation(translation);
              
-             // Save sentence translation back to article
              const updatedSentences = [...activeArticle.sentences];
              updatedSentences[selectedSentenceIndex] = { 
                  ...updatedSentences[selectedSentenceIndex], 
                  translation 
              };
              const updatedArticle = { ...activeArticle, sentences: updatedSentences };
-             
              setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
              
              if (settings.dataSourceMode === 'server' && settings.serverUrl) {
@@ -671,7 +668,6 @@ function App() {
       console.error(err);
       const errStr = err.toString();
       const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('RESOURCE_EXHAUSTED');
-      
       if (isQuota) {
           setError("API Quota Exceeded (429). Please switch to 'Custom API' in Settings.");
       } else {
@@ -695,14 +691,12 @@ function App() {
      
      try {
          let cardData: WordCardData;
-         
          if (typeof wordOrItem === 'object' && wordOrItem.cardData) {
              cardData = wordOrItem.cardData;
          } else {
              const word = typeof wordOrItem === 'string' ? wordOrItem : (wordOrItem as SavedItem).original;
              cardData = await fetchCardData(word);
          }
-         
          setWordCardStack([cardData]);
      } catch (err: any) {
          setToast(err.message || "Could not load card.");
@@ -717,7 +711,6 @@ function App() {
     if (!activeArticle) return;
     
     const textToSave = currentCard ? currentCard.word : selectedText!;
-    
     const exists = savedItems.some(item => item.original.toLowerCase() === textToSave.toLowerCase());
     if (exists) {
         setToast("Item already exists in your collection.");
@@ -740,7 +733,6 @@ function App() {
     setSavedItems(prev => [newItem, ...prev]);
     addToHistory('ADD', textToSave, newItem.type);
     
-    // Save to Server if enabled
     if (settings.dataSourceMode === 'server' && settings.serverUrl) {
         try {
             await api.saveItem(settings.serverUrl, newItem);
@@ -750,7 +742,6 @@ function App() {
             return;
         }
     }
-    
     setToast("Added to your collection!");
   };
 
@@ -775,7 +766,7 @@ function App() {
       setIsSidebarOpen(false);
   };
 
-  const handleImportArticle = async (article: Article) => {
+  const handleImportArticle = async (article: Article, autoTranslate: boolean = false) => {
       setArticles(prev => [article, ...prev]);
       setActiveArticleId(article.id);
       setViewMode(ViewMode.READ);
@@ -784,6 +775,12 @@ function App() {
       if (settings.dataSourceMode === 'server' && settings.serverUrl) {
           await api.saveArticle(settings.serverUrl, article);
       }
+
+      if (autoTranslate) {
+          setShowTranslation(true);
+          setSettings(prev => ({ ...prev, layoutMode: 'split' }));
+          await executeArticleTranslation(article);
+      }
   };
 
   const handleDeleteArticle = async (id: string) => {
@@ -791,13 +788,32 @@ function App() {
       if (activeArticleId === id) {
           setActiveArticleId(articles.length > 1 ? articles[0].id : null);
       }
-
       if (settings.dataSourceMode === 'server' && settings.serverUrl) {
           await api.deleteArticle(settings.serverUrl, id);
       }
   };
+
+  const handleDeleteGroup = async (groupId: string) => {
+      const articlesToDelete = articles.filter(a => a.groupId === groupId);
+      setArticles(prev => prev.filter(a => a.groupId !== groupId));
+      
+      // If currently reading one of the deleted articles, reset view
+      if (activeArticle && activeArticle.groupId === groupId) {
+          setActiveArticleId(null);
+      }
+
+      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+          // Sequentially delete from server
+          for (const a of articlesToDelete) {
+              try {
+                  await api.deleteArticle(settings.serverUrl, a.id);
+              } catch(e) {
+                  console.error("Failed to delete article from server", a.id);
+              }
+          }
+      }
+  };
   
-  // Toggle Theme between Light and Dark
   const toggleNightMode = () => {
       setSettings(prev => ({
           ...prev,
@@ -805,15 +821,6 @@ function App() {
       }));
   };
   
-  // Toggle Layout Mode
-  const toggleLayoutMode = () => {
-      setSettings(prev => ({
-          ...prev,
-          layoutMode: prev.layoutMode === 'split' ? 'inline' : 'split'
-      }));
-  };
-  
-  // Change Font Size
   const changeFontSize = (delta: number) => {
       setSettings(prev => ({
           ...prev,
@@ -821,7 +828,6 @@ function App() {
       }));
   };
 
-  // Change Line Height
   const changeLineHeight = (delta: number) => {
       setSettings(prev => {
           const current = prev.lineHeight || 1.6;
@@ -874,7 +880,6 @@ function App() {
           </span>
       );
 
-      // Inline Rendering Logic
       if (settings.layoutMode === 'inline') {
         return (
             <div className="mb-1 inline" key={sentence.index}>
@@ -889,7 +894,6 @@ function App() {
         );
       }
       
-      // Split View Rendering: Just return the content, grid handles layout
       return sentenceContent;
   };
 
@@ -898,7 +902,6 @@ function App() {
         className={`flex h-screen overflow-hidden font-sans transition-colors duration-500 ${theme.appBg} ${theme.text}`}
         style={customStyle}
     >
-      {/* Toast */}
       {toast && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-fade-in-down pointer-events-none">
             <div className="bg-slate-800/90 backdrop-blur-md text-white px-5 py-3 rounded-full shadow-2xl border border-white/10 flex items-center gap-3 text-sm font-medium">
@@ -908,18 +911,16 @@ function App() {
         </div>
       )}
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 relative">
-        
-        {/* Header */}
         <header 
-            className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors ${theme.headerBg}`}
-            style={theme.isCustom ? { backgroundColor: settings.customThemeColors?.headerBg } : {}}
+            className={`flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors ${theme.headerBg} pb-2`}
+            style={{ 
+                ...theme.isCustom ? { backgroundColor: settings.customThemeColors?.headerBg } : {},
+                paddingTop: 'env(safe-area-inset-top)',
+                minHeight: 'calc(4rem + env(safe-area-inset-top))'
+            }}
         >
-          <div 
-            className="flex items-center gap-3 min-w-0"
-          >
-            {/* Toggle Left Sidebar */}
+          <div className="flex items-center gap-3 min-w-0">
             {viewMode === ViewMode.READ && activeArticle && (
                  <button 
                     onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
@@ -942,7 +943,6 @@ function App() {
                     {viewMode === ViewMode.LIBRARY ? 'Library' : (viewMode === ViewMode.STATS ? 'Analytics' : (activeArticle?.title || 'Reader'))}
                 </h1>
                 
-                {/* Stats in Header */}
                 {viewMode === ViewMode.READ && activeArticle && (
                     <div className="flex items-center gap-2 text-[10px] uppercase font-bold opacity-60">
                         <span>{articleStats.enCount} Words</span>
@@ -956,7 +956,6 @@ function App() {
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {viewMode === ViewMode.READ && (
                 <>  
-                    {/* Font Size Controls */}
                     <div className="flex items-center bg-black/5 rounded-lg mr-1 p-1 hidden md:flex">
                         <button 
                             onClick={() => changeFontSize(-1)}
@@ -975,7 +974,6 @@ function App() {
                         </button>
                     </div>
 
-                    {/* Line Height Controls */}
                     <div className="flex items-center bg-black/5 rounded-lg mr-2 p-1 hidden lg:flex">
                         <button 
                             onClick={() => changeLineHeight(-0.2)}
@@ -1002,7 +1000,6 @@ function App() {
                          {settings.theme === 'dark' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
                     </button>
                     
-                    {/* Translate Button - Now Toggles Split Mode */}
                     <button 
                         onClick={toggleTranslation}
                         className={`px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 border font-bold text-xs ml-2
@@ -1071,7 +1068,6 @@ function App() {
         </header>
         
         <div className="flex-1 flex overflow-hidden">
-            {/* Desktop Left Sidebar (Table of Contents) */}
             {isLeftSidebarOpen && viewMode === ViewMode.READ && activeArticle && (
                 <div className="hidden md:block shrink-0 relative z-20">
                      <LeftSidebar 
@@ -1084,11 +1080,13 @@ function App() {
                 </div>
             )}
             
-            {/* Mobile Left Sidebar Drawer */}
             {isLeftSidebarOpen && viewMode === ViewMode.READ && activeArticle && (
                 <div className="md:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm">
-                   <div className="w-72 h-full animate-slide-in-right bg-white shadow-2xl relative">
-                        <button onClick={() => setIsLeftSidebarOpen(false)} className="absolute top-2 right-2 p-2 text-slate-400 z-10">✕</button>
+                   <div 
+                        className="w-72 h-full animate-slide-in-right bg-white shadow-2xl relative"
+                        style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+                   >
+                        <button onClick={() => setIsLeftSidebarOpen(false)} className="absolute right-2 p-2 text-slate-400 z-10 mt-2" style={{ top: 'env(safe-area-inset-top)' }}>✕</button>
                         <LeftSidebar 
                             articles={groupData.siblings}
                             currentArticleId={activeArticleId}
@@ -1101,7 +1099,6 @@ function App() {
                 </div>
             )}
 
-            {/* View Content Switcher */}
             {viewMode === ViewMode.STATS ? (
                 <StatsView 
                     history={historyRecords} 
@@ -1122,12 +1119,10 @@ function App() {
                     }} 
                     onImportArticle={handleImportArticle}
                     onDeleteArticle={handleDeleteArticle}
+                    onDeleteGroup={handleDeleteGroup}
                 />
             ) : (
                 <>
-                    {/* READ MODE */}
-                    
-                    {/* Dashboard: Floating on Right Side (Center) */}
                     {viewMode === ViewMode.READ && activeArticle && (
                         <ReadingDashboard 
                             wordCount={articleStats.enCount} 
@@ -1138,8 +1133,10 @@ function App() {
                         />
                     )}
 
-                    {/* Progress Bar (Top) */}
-                    <div className="w-full h-1 bg-black/5 absolute top-0 left-0 right-0 z-20">
+                    <div 
+                        className="w-full h-1 bg-black/5 absolute left-0 right-0 z-20 mt-16"
+                        style={{ top: 'env(safe-area-inset-top)' }}
+                    >
                         <div 
                             className="h-full bg-indigo-500 transition-all duration-150 ease-out"
                             style={{ width: `${readingProgress}%`, backgroundColor: theme.isCustom ? settings.customThemeColors?.accent : undefined }}
@@ -1185,7 +1182,6 @@ function App() {
                                     
                                     {settings.layoutMode === 'split' ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
-                                            {/* Split View Content */}
                                             {activeArticle.sentences.map((sentence, idx) => (
                                                 <React.Fragment key={sentence.index}>
                                                     <div className={`
@@ -1211,7 +1207,6 @@ function App() {
                                             ))}
                                         </div>
                                     ) : (
-                                        /* Inline View Content */
                                         activeArticle.sentences.map((sentence, idx) => (
                                             <React.Fragment key={sentence.index}>
                                                 {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
@@ -1220,7 +1215,6 @@ function App() {
                                         ))
                                     )}
 
-                                    {/* Bottom Chapter Navigation */}
                                     <div className="mt-16 pt-8 border-t border-current/10 flex justify-between items-center gap-4">
                                         {groupData.prev ? (
                                             <button 
@@ -1263,7 +1257,6 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Floating Action Menu */}
                     {selectionRect && !topCard && !activeTranslation && !error && (
                         <div 
                             className="absolute z-40 animate-fade-in-up"
@@ -1283,7 +1276,6 @@ function App() {
                         </div>
                     )}
 
-                    {/* Result Sheets */}
                     {previousCard && (
                         <DraggableSheet
                             key={`prev-${previousCard.word}`}
@@ -1395,7 +1387,6 @@ function App() {
         </div>
       </div>
 
-      {/* Settings Modal */}
       {isSettingsOpen && (
           <SettingsView 
             settings={settings}
@@ -1407,9 +1398,11 @@ function App() {
           />
       )}
 
-      {/* Sidebar */}
       {isSidebarOpen && (
-        <div className="hidden md:block w-80 shrink-0 h-full border-l border-white/10 relative z-20 shadow-2xl">
+        <div 
+            className="hidden md:block w-80 shrink-0 h-full border-l border-white/10 relative z-20 shadow-2xl"
+            style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
             <Sidebar 
                 savedItems={savedItems} 
                 onRemoveItem={removeSavedItem} 
@@ -1420,11 +1413,13 @@ function App() {
         </div>
       )}
       
-      {/* Mobile Sidebar */}
       {isSidebarOpen && (
         <div className="md:hidden fixed inset-0 z-[60] bg-black/50 flex justify-end backdrop-blur-sm">
-           <div className="w-80 h-full shadow-2xl relative animate-slide-in-right">
-              <button onClick={() => setIsSidebarOpen(false)} className="absolute top-2 right-2 p-2 text-slate-400 z-10">✕</button>
+           <div 
+                className="w-80 h-full shadow-2xl relative animate-slide-in-right"
+                style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+           >
+              <button onClick={() => setIsSidebarOpen(false)} className="absolute right-2 p-2 text-slate-400 z-10 mt-2" style={{ top: 'env(safe-area-inset-top)' }}>✕</button>
               <Sidebar 
                 savedItems={savedItems} 
                 onRemoveItem={removeSavedItem} 
