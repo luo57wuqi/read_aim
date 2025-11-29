@@ -1,3 +1,4 @@
+致敬：王振宇，王哥
 
 # Smart English Reader 操作手册
 
