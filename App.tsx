@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { App as CapApp } from '@capacitor/app'; // For hardware back button
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
 import { fetchFromCustomApi, translateWithCustomApi, translateBatchWithCustomApi } from './services/customApiService';
 import { api } from './services/backendService';
@@ -21,6 +20,7 @@ const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in s
 const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-2.5-flash',
     dataSourceMode: 'ai',
+    useServerStorage: false,
     theme: 'light',
     serverUrl: 'http://localhost:5000',
     fontSize: 18,
@@ -100,42 +100,21 @@ function App() {
   useEffect(() => {
     const savedSettings = localStorage.getItem('english_reader_settings');
     if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+        try {
+            const parsed = JSON.parse(savedSettings);
+            
+            // Migration Logic: If coming from old version where dataSourceMode was 'server'
+            if (parsed.dataSourceMode === 'server') {
+                parsed.useServerStorage = true;
+                parsed.dataSourceMode = 'ai'; // Revert AI to default Gemini, let user switch to custom if needed
+            }
+            
+            setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+        } catch (e) {
+            console.error("Failed to parse settings", e);
+        }
     }
   }, []);
-
-  // Hardware Back Button Handler (Mobile)
-  useEffect(() => {
-      const handleBackButton = async () => {
-          CapApp.addListener('backButton', ({ canGoBack }) => {
-              if (isSettingsOpen) {
-                  setIsSettingsOpen(false);
-              } else if (wordCardStack.length > 0) {
-                  setWordCardStack(prev => prev.slice(0, -1));
-              } else if (activeTranslation) {
-                  setActiveTranslation(null);
-                  setSelectedText(null);
-              } else if (isSidebarOpen) {
-                  setIsSidebarOpen(false);
-              } else if (isLeftSidebarOpen) {
-                  setIsLeftSidebarOpen(false);
-              } else if (viewMode !== ViewMode.READ) {
-                  setViewMode(ViewMode.READ);
-              } else {
-                  // If on main screen, let system handle it (minimize or exit)
-                  if (!canGoBack) {
-                      CapApp.exitApp();
-                  }
-              }
-          });
-      };
-      handleBackButton();
-      
-      return () => {
-          CapApp.removeAllListeners();
-      };
-  }, [isSettingsOpen, wordCardStack, activeTranslation, isSidebarOpen, isLeftSidebarOpen, viewMode]);
 
   // Data Loading Effect
   useEffect(() => {
@@ -146,7 +125,8 @@ function App() {
         const statsLocal = JSON.parse(localStorage.getItem('english_reader_word_stats') || '{}');
         const sessionsLocal = JSON.parse(localStorage.getItem('english_reader_sessions') || '[]');
 
-        if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+        // Check useServerStorage instead of dataSourceMode
+        if (settings.useServerStorage && settings.serverUrl) {
             try {
                 const [serverArticles, serverItems] = await Promise.all([
                     api.getArticles(settings.serverUrl),
@@ -154,6 +134,8 @@ function App() {
                 ]);
                 setArticles(serverArticles);
                 setSavedItems(serverItems);
+                
+                // History/Stats/Sessions still local for now unless backend expanded
                 setHistoryRecords(historyLocal);
                 setWordStats(statsLocal);
                 setReadingSessions(sessionsLocal);
@@ -164,8 +146,9 @@ function App() {
                     createDefaultArticle();
                 }
             } catch (err) {
-                console.error("Server Sync Failed", err);
+                console.error("Server Connection Failed", err);
                 setToast("Server Connection Failed. Using Local Data.");
+                // Fallback to local
                 setArticles(articlesLocal);
                 setSavedItems(savedItemsLocal);
                 setHistoryRecords(historyLocal);
@@ -183,9 +166,9 @@ function App() {
         }
     };
     loadData();
-  }, [settings.dataSourceMode, settings.serverUrl]); 
+  }, [settings.useServerStorage, settings.serverUrl]); 
 
-  // Persist State
+  // Persist State (Local backup always happens)
   useEffect(() => {
       localStorage.setItem('english_reader_saved_items', JSON.stringify(savedItems));
       localStorage.setItem('english_reader_articles', JSON.stringify(articles));
@@ -422,7 +405,7 @@ function App() {
       if (data.articles.length > 0) setActiveArticleId(data.articles[0].id);
       setToast("Data restored locally!");
 
-      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+      if (settings.useServerStorage && settings.serverUrl) {
           setToast("Syncing backup to server database...");
           try {
               await api.restoreBackup(settings.serverUrl, data);
@@ -454,7 +437,7 @@ function App() {
           return merged;
       });
 
-      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+      if (settings.useServerStorage && settings.serverUrl) {
           newItemsToAdd.forEach(item => {
               api.saveItem(settings.serverUrl, item).catch(e => console.error("Sync merge failed", e));
           });
@@ -507,7 +490,7 @@ function App() {
         const updatedArticle = { ...targetArticle, sentences: newSentences };
         setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
         
-        if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+        if (settings.useServerStorage && settings.serverUrl) {
             await api.saveArticle(settings.serverUrl, updatedArticle);
         }
 
@@ -659,7 +642,7 @@ function App() {
              const updatedArticle = { ...activeArticle, sentences: updatedSentences };
              setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
              
-             if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+             if (settings.useServerStorage && settings.serverUrl) {
                  await api.saveArticle(settings.serverUrl, updatedArticle);
              }
         }
@@ -733,7 +716,7 @@ function App() {
     setSavedItems(prev => [newItem, ...prev]);
     addToHistory('ADD', textToSave, newItem.type);
     
-    if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+    if (settings.useServerStorage && settings.serverUrl) {
         try {
             await api.saveItem(settings.serverUrl, newItem);
         } catch (err) {
@@ -750,7 +733,7 @@ function App() {
     if (item) addToHistory('REMOVE', item.original, item.type);
     setSavedItems(prev => prev.filter(item => item.id !== id));
 
-    if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+    if (settings.useServerStorage && settings.serverUrl) {
         try {
             await api.deleteItem(settings.serverUrl, id);
         } catch(e) {
@@ -772,7 +755,7 @@ function App() {
       setViewMode(ViewMode.READ);
       setToast("Article imported successfully!");
       
-      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+      if (settings.useServerStorage && settings.serverUrl) {
           await api.saveArticle(settings.serverUrl, article);
       }
 
@@ -788,7 +771,7 @@ function App() {
       if (activeArticleId === id) {
           setActiveArticleId(articles.length > 1 ? articles[0].id : null);
       }
-      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+      if (settings.useServerStorage && settings.serverUrl) {
           await api.deleteArticle(settings.serverUrl, id);
       }
   };
@@ -802,7 +785,7 @@ function App() {
           setActiveArticleId(null);
       }
 
-      if (settings.dataSourceMode === 'server' && settings.serverUrl) {
+      if (settings.useServerStorage && settings.serverUrl) {
           // Sequentially delete from server
           for (const a of articlesToDelete) {
               try {
@@ -1352,7 +1335,7 @@ function App() {
                                                         translation: newData.translation,
                                                         cardData: newData
                                                     };
-                                                    if(settings.dataSourceMode === 'server' && settings.serverUrl) {
+                                                    if(settings.useServerStorage && settings.serverUrl) {
                                                         api.saveItem(settings.serverUrl, updatedItem).catch(console.error);
                                                     }
                                                     return updatedItem;

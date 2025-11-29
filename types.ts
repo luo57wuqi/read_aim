@@ -92,7 +92,7 @@ export interface WordUsageData {
 
 export type WordStatsMap = Record<string, WordUsageData>;
 
-export type DataSourceMode = 'ai' | 'local_only' | 'custom_api' | 'server';
+export type DataSourceMode = 'ai' | 'local_only' | 'custom_api'; // Removed 'server' as a mode, it's now a flag
 export type Theme = 'light' | 'dark' | 'sepia' | 'forest' | 'amethyst' | 'custom';
 export type LayoutMode = 'inline' | 'split';
 
@@ -115,7 +115,9 @@ export interface AppSettings {
   aiModel: string; // e.g. 'gemini-2.5-flash'
   customApiKey?: string; // Optional user override
   geminiBaseUrl?: string; // Optional Base URL for proxying (e.g. https://my-proxy.com)
-  dataSourceMode: DataSourceMode; // Preference for fetching data
+  
+  dataSourceMode: DataSourceMode; // Controls AI Source (Gemini vs Custom vs Local)
+  useServerStorage: boolean; // Controls Storage Source (Local vs Python Backend)
   
   // Appearance
   theme: Theme;

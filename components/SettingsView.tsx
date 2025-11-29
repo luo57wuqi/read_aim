@@ -389,7 +389,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* Data Source Basic */}
                     <div>
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">单词来源 (Dictionary Source)</h3>
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">单词来源 (AI Source)</h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <button 
                                 onClick={() => setLocalSettings(p => ({...p, dataSourceMode: 'ai'}))}
@@ -493,7 +493,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             <p className="text-xs text-blue-600 mb-3 leading-relaxed">
                                 Connect to a local Flask + SQLite server to manage data outside the browser. 
                                 <br/>
-                                <strong>Note:</strong> When "Server Mode" is enabled below, the app will read/write directly to your database instead of LocalStorage.
+                                <strong>Note:</strong> When enabled, the app syncs data with your Python server regardless of which AI model (Gemini/Custom) you use.
                             </p>
                         </div>
 
@@ -524,24 +524,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <div className="flex items-center justify-between p-4 border border-slate-200 rounded-lg bg-slate-50">
                             <div>
                                 <span className="block font-bold text-slate-700 text-sm">启用服务器存储 (Enable Server Storage)</span>
-                                <span className="text-xs text-slate-500">Overrides LocalStorage. Ensure server is running.</span>
+                                <span className="text-xs text-slate-500">Sync data with backend. Independent of AI source.</span>
                             </div>
                             <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
                                 <input 
                                     type="checkbox" 
                                     name="toggle" 
                                     id="server-toggle" 
-                                    checked={localSettings.dataSourceMode === 'server'}
+                                    checked={localSettings.useServerStorage}
                                     onChange={(e) => setLocalSettings(p => ({
                                         ...p, 
-                                        dataSourceMode: e.target.checked ? 'server' : 'ai' // Default back to AI if off
+                                        useServerStorage: e.target.checked
                                     }))}
                                     className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 ease-in-out checked:right-0 right-5 checked:border-indigo-600"
-                                    style={{ right: localSettings.dataSourceMode === 'server' ? '0' : 'auto', left: localSettings.dataSourceMode === 'server' ? 'auto' : '0' }}
+                                    style={{ right: localSettings.useServerStorage ? '0' : 'auto', left: localSettings.useServerStorage ? 'auto' : '0' }}
                                 />
                                 <label 
                                     htmlFor="server-toggle" 
-                                    className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors duration-300 ${localSettings.dataSourceMode === 'server' ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                                    className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors duration-300 ${localSettings.useServerStorage ? 'bg-indigo-600' : 'bg-slate-300'}`}
                                 ></label>
                             </div>
                         </div>
