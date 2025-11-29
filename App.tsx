@@ -1,18 +1,19 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
 import { fetchFromCustomApi, translateWithCustomApi, translateBatchWithCustomApi } from './services/customApiService';
 import { api } from './services/backendService';
 import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData, ReadingSession } from './types';
 import { Sidebar } from './components/Sidebar';
+import { LeftSidebar } from './components/LeftSidebar'; // Import LeftSidebar
 import { VocabularyCard } from './components/VocabularyCard';
 import { DraggableSheet } from './components/DraggableSheet';
 import { StatsView } from './components/StatsView';
 import { ArticleLibrary } from './components/ArticleLibrary';
 import { SettingsView } from './components/SettingsView';
-import { ReadingDashboard } from './components/ReadingDashboard'; // Import Dashboard
+import { ReadingDashboard } from './components/ReadingDashboard'; 
 import { processTextToArticle, countWordStats } from './utils/textHelpers';
-import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon } from './components/Icons';
+import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon, ArrowLeftIcon } from './components/Icons';
 
 const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in scientific discovery. Many breakthrough inventions were not the result of rigorous planning, but rather happy accidents that occurred while researchers were looking for something else. For instance, penicillin was discovered when Alexander Fleming returned from a holiday to find that mold had killed bacteria in a petri dish he had left uncovered. This illustrates that while method is important, maintaining an open mind to the unexpected is equally vital for progress.`;
 
@@ -46,7 +47,10 @@ function App() {
   
   // Saved Items
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // Layout State
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Right sidebar
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false); // Left sidebar (TOC)
   
   // Settings & App Config
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -186,6 +190,26 @@ function App() {
   const currentArticleSessions = readingSessions
     .filter(s => s.articleId === activeArticleId)
     .sort((a, b) => b.startTime - a.startTime); // Newest first
+
+  // Group Articles Logic (For Left Sidebar & Navigation)
+  const groupData = useMemo(() => {
+     if (!activeArticle) return { siblings: [], currentIndex: -1, prev: null, next: null };
+     
+     let siblings: Article[] = [];
+     if (activeArticle.groupId) {
+         siblings = articles
+            .filter(a => a.groupId === activeArticle.groupId)
+            .sort((a,b) => a.createdAt - b.createdAt);
+     } else {
+         siblings = [activeArticle];
+     }
+     
+     const currentIndex = siblings.findIndex(a => a.id === activeArticleId);
+     const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
+     const next = currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null;
+
+     return { siblings, currentIndex, prev, next };
+  }, [activeArticle, articles, activeArticleId]);
 
   // Article Stats
   const articleStats = activeArticle 
@@ -344,6 +368,8 @@ function App() {
           sessionMaxProgressRef.current = 0;
           previousArticleIdRef.current = activeArticleId;
           setReadingProgress(0); // Reset UI progress
+          // Scroll to top when article changes
+          if (containerRef.current) containerRef.current.scrollTop = 0;
       } else {
           // If leaving read mode, end session
           previousArticleIdRef.current = null;
@@ -867,6 +893,18 @@ function App() {
           <div 
             className="flex items-center gap-3 min-w-0"
           >
+            {/* Toggle Left Sidebar */}
+            {viewMode === ViewMode.READ && activeArticle && (
+                 <button 
+                    onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
+                    className={`p-2 rounded-lg shrink-0 transition-colors ${isLeftSidebarOpen ? theme.accent : 'hover:bg-black/5 opacity-60 hover:opacity-100'}`}
+                    style={isLeftSidebarOpen && theme.isCustom ? { color: settings.customThemeColors?.accent } : {}}
+                    title="Toggle Table of Contents"
+                >
+                    <ListBulletIcon className="w-6 h-6" />
+                </button>
+            )}
+
             <button
                 className="bg-indigo-600 p-2 rounded-lg hidden sm:block shrink-0 shadow-lg shadow-indigo-600/20 hover:scale-105 transition-transform"
                 onClick={() => setViewMode(ViewMode.LIBRARY)}
@@ -878,7 +916,7 @@ function App() {
                     {viewMode === ViewMode.LIBRARY ? 'Library' : (viewMode === ViewMode.STATS ? 'Analytics' : (activeArticle?.title || 'Reader'))}
                 </h1>
                 
-                {/* Stats in Header as requested */}
+                {/* Stats in Header */}
                 {viewMode === ViewMode.READ && activeArticle && (
                     <div className="flex items-center gap-2 text-[10px] uppercase font-bold opacity-60">
                         <span>{articleStats.enCount} Words</span>
@@ -986,262 +1024,327 @@ function App() {
             </button>
           </div>
         </header>
-
-        {/* View Content Switcher */}
-        {viewMode === ViewMode.STATS ? (
-            <StatsView 
-                history={historyRecords} 
-                wordStats={wordStats}
-                articles={articles}
-                sessions={readingSessions}
-                currentArticleId={activeArticleId || undefined}
-                onClose={() => setViewMode(ViewMode.READ)}
-                onNavigateToContext={handleJumpToContext} 
-                onViewCard={handleViewCard}
-            />
-        ) : viewMode === ViewMode.LIBRARY ? (
-            <ArticleLibrary 
-                articles={articles} 
-                onSelectArticle={(id) => {
-                    setActiveArticleId(id);
-                    setViewMode(ViewMode.READ);
-                }} 
-                onImportArticle={handleImportArticle}
-                onDeleteArticle={handleDeleteArticle}
-            />
-        ) : (
-            <>
-                {/* READ MODE */}
-                
-                {/* Dashboard: Floating on Right Side (Center) */}
-                {viewMode === ViewMode.READ && activeArticle && (
-                    <ReadingDashboard 
-                        wordCount={articleStats.enCount} 
-                        progress={readingProgress}
-                        isActive={!isSettingsOpen && !isSidebarOpen}
-                        themeAccent={theme.accent}
-                        sessions={currentArticleSessions}
-                    />
-                )}
-
-                {/* Progress Bar (Top) */}
-                <div className="w-full h-1 bg-black/5 relative z-20">
-                    <div 
-                        className="h-full bg-indigo-500 transition-all duration-150 ease-out"
-                        style={{ width: `${readingProgress}%`, backgroundColor: theme.isCustom ? settings.customThemeColors?.accent : undefined }}
-                    />
+        
+        <div className="flex-1 flex overflow-hidden">
+            {/* Desktop Left Sidebar (Table of Contents) */}
+            {isLeftSidebarOpen && viewMode === ViewMode.READ && activeArticle && (
+                <div className="hidden md:block shrink-0 relative z-20">
+                     <LeftSidebar 
+                        articles={groupData.siblings}
+                        currentArticleId={activeArticleId}
+                        groupTitle={activeArticle.groupTitle || activeArticle.title}
+                        onSelectArticle={setActiveArticleId}
+                        theme={settings.theme}
+                     />
                 </div>
-
-                <div 
-                    ref={containerRef}
-                    onScroll={handleScroll}
-                    className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 relative pb-24 scroll-smooth"
-                    onClick={() => {
-                        setSelectedText(null);
-                        setSelectionRect(null);
-                        setWordCardStack([]);
-                    }}
-                >
-                    <div className={`max-w-4xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-500 
-                        ${theme.paperBg} ${theme.shadow} border
-                        ${settings.layoutMode === 'split' ? 'max-w-[90rem]' : ''}
-                        ${theme.isCustom ? 'bg-white/5 backdrop-blur-sm border-white/10' : ''}
-                        `}
-                    >
-                        {!activeArticle ? (
-                            <div className="text-center py-20 opacity-50">
-                                <p>No article selected.</p>
-                                <button onClick={() => setViewMode(ViewMode.LIBRARY)} className="text-indigo-500 hover:underline">Go to Library</button>
-                            </div>
-                        ) : (
-                            <div 
-                                className={`reader-text leading-loose`} 
-                                style={{ fontSize: `${settings.fontSize}px` }}
-                            >
-                                <div className="mb-8 border-b border-dashed border-current/10 pb-6">
-                                    <h2 className="text-4xl font-bold font-serif mb-2 tracking-tight">{activeArticle.title}</h2>
-                                    <p className={`text-sm opacity-50 ${theme.textMuted} font-mono`}>
-                                        {new Date(activeArticle.createdAt).toLocaleDateString()}
-                                    </p>
-                                </div>
-                                
-                                {settings.layoutMode === 'split' ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
-                                        {/* Split View Content */}
-                                        {activeArticle.sentences.map((sentence, idx) => (
-                                            <React.Fragment key={sentence.index}>
-                                                <div className={`
-                                                    ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
-                                                    hover:bg-black/5 rounded p-1 -ml-1 transition-colors
-                                                `}>
-                                                     {renderSentence(sentence)}
-                                                </div>
-                                                <div className={`
-                                                    ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
-                                                    ${theme.textMuted} font-sans leading-relaxed text-base flex items-center
-                                                    hover:bg-black/5 rounded p-1 -ml-1 transition-colors
-                                                `}>
-                                                    {showTranslation && sentence.translation ? (
-                                                        <div className="pl-2 border-l-2 border-indigo-500/20 w-full">
-                                                            {sentence.translation}
-                                                        </div>
-                                                    ) : (
-                                                        <span className="opacity-10 select-none w-full border-l-2 border-transparent pl-2">•</span>
-                                                    )}
-                                                </div>
-                                            </React.Fragment>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    /* Inline View Content */
-                                    activeArticle.sentences.map((sentence, idx) => (
-                                        <React.Fragment key={sentence.index}>
-                                            {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
-                                            {renderSentence(sentence)}
-                                        </React.Fragment>
-                                    ))
-                                )}
-                            </div>
-                        )}
-                        
-                        {isTranslatingArticle && (
-                            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 text-sm animate-bounce z-50">
-                                <span className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse"></span>
-                                Translating in background...
-                            </div>
-                        )}
-                    </div>
+            )}
+            
+            {/* Mobile Left Sidebar Drawer */}
+            {isLeftSidebarOpen && viewMode === ViewMode.READ && activeArticle && (
+                <div className="md:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm">
+                   <div className="w-72 h-full animate-slide-in-right bg-white shadow-2xl relative">
+                        <button onClick={() => setIsLeftSidebarOpen(false)} className="absolute top-2 right-2 p-2 text-slate-400 z-10">✕</button>
+                        <LeftSidebar 
+                            articles={groupData.siblings}
+                            currentArticleId={activeArticleId}
+                            groupTitle={activeArticle.groupTitle || activeArticle.title}
+                            onSelectArticle={setActiveArticleId}
+                            onCloseMobile={() => setIsLeftSidebarOpen(false)}
+                            theme={settings.theme}
+                        />
+                   </div>
                 </div>
+            )}
 
-                {/* Floating Action Menu */}
-                {selectionRect && !topCard && !activeTranslation && !error && (
-                    <div 
-                        className="absolute z-40 animate-fade-in-up"
-                        style={{ 
-                            top: selectionRect.bottom + (isInteractiveMode ? 20 : 15), 
-                            left: selectionRect.left + selectionRect.width / 2,
-                            transform: 'translateX(-50%)'
-                        }}
-                    >
-                        <button 
-                            onClick={handleTranslate}
-                            className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl hover:bg-black hover:scale-105 flex items-center gap-3 text-sm font-bold transition-all whitespace-nowrap border border-slate-700 ring-2 ring-white/20"
-                        >
-                            <SparklesIcon className="w-4 h-4 text-yellow-400" />
-                            {isLoading ? 'Thinking...' : (selectionScope === 'word' ? 'Explain Word' : 'Translate Sentence')}
-                        </button>
+            {/* View Content Switcher */}
+            {viewMode === ViewMode.STATS ? (
+                <StatsView 
+                    history={historyRecords} 
+                    wordStats={wordStats}
+                    articles={articles}
+                    sessions={readingSessions}
+                    currentArticleId={activeArticleId || undefined}
+                    onClose={() => setViewMode(ViewMode.READ)}
+                    onNavigateToContext={handleJumpToContext} 
+                    onViewCard={handleViewCard}
+                />
+            ) : viewMode === ViewMode.LIBRARY ? (
+                <ArticleLibrary 
+                    articles={articles} 
+                    onSelectArticle={(id) => {
+                        setActiveArticleId(id);
+                        setViewMode(ViewMode.READ);
+                    }} 
+                    onImportArticle={handleImportArticle}
+                    onDeleteArticle={handleDeleteArticle}
+                />
+            ) : (
+                <>
+                    {/* READ MODE */}
+                    
+                    {/* Dashboard: Floating on Right Side (Center) */}
+                    {viewMode === ViewMode.READ && activeArticle && (
+                        <ReadingDashboard 
+                            wordCount={articleStats.enCount} 
+                            progress={readingProgress}
+                            isActive={!isSettingsOpen && !isSidebarOpen}
+                            themeAccent={theme.accent}
+                            sessions={currentArticleSessions}
+                        />
+                    )}
+
+                    {/* Progress Bar (Top) */}
+                    <div className="w-full h-1 bg-black/5 absolute top-0 left-0 right-0 z-20">
+                        <div 
+                            className="h-full bg-indigo-500 transition-all duration-150 ease-out"
+                            style={{ width: `${readingProgress}%`, backgroundColor: theme.isCustom ? settings.customThemeColors?.accent : undefined }}
+                        />
                     </div>
-                )}
 
-                {/* Result Sheets */}
-                {previousCard && (
-                     <DraggableSheet
-                         key={`prev-${previousCard.word}`}
-                         title={`Previous: ${previousCard.word}`}
-                         onClose={() => setWordCardStack(prev => prev.slice(0, -1))} 
-                         initialOffset={window.innerWidth >= 768 ? { x: -320, y: 0 } : { x: 0, y: -40 }}
-                         className="opacity-95 z-40 border-slate-300 shadow-xl"
-                     >
-                         <VocabularyCard 
-                            data={previousCard} 
-                            isStacked={true}
-                            onGoBack={() => setWordCardStack(prev => prev.slice(0, -2).concat(prev.slice(-1)))}
-                            canGoBack={false} 
-                         />
-                     </DraggableSheet>
-                )}
-
-                {(topCard || activeTranslation || error) && (
-                    <DraggableSheet
-                        key={topCard?.word || 'active'}
-                        title={topCard ? "Vocabulary Card" : (error ? "Error" : "Translation")}
-                        initialOffset={{ x: 0, y: 0 }}
-                        onClose={() => {
+                    <div 
+                        ref={containerRef}
+                        onScroll={handleScroll}
+                        className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 relative pb-24 scroll-smooth"
+                        onClick={() => {
+                            setSelectedText(null);
+                            setSelectionRect(null);
                             setWordCardStack([]);
-                            setActiveTranslation(null);
-                            setError(null);
                         }}
-                        className="z-50 border-indigo-100 shadow-2xl"
                     >
-                        {error && (
-                            <div className="p-6 text-red-600 text-center flex flex-col items-center gap-4">
-                                <p className="font-bold">{error}</p>
-                                {error.includes('Quota') && (
-                                    <button 
-                                        onClick={() => setIsSettingsOpen(true)}
-                                        className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-bold shadow-lg"
-                                    >
-                                        Configure API Key
-                                    </button>
-                                )}
-                            </div>
-                        )}
-
-                        {activeTranslation && !error && (
-                            <div className="p-6 pb-12">
-                                <div className="mb-4">
-                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Original</h3>
-                                    <p className="text-slate-800 text-lg font-serif leading-relaxed">{selectedText}</p>
+                        <div className={`max-w-4xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-500 
+                            ${theme.paperBg} ${theme.shadow} border
+                            ${settings.layoutMode === 'split' ? 'max-w-[90rem]' : ''}
+                            ${theme.isCustom ? 'bg-white/5 backdrop-blur-sm border-white/10' : ''}
+                            `}
+                        >
+                            {!activeArticle ? (
+                                <div className="text-center py-20 opacity-50">
+                                    <p>No article selected.</p>
+                                    <button onClick={() => setViewMode(ViewMode.LIBRARY)} className="text-indigo-500 hover:underline">Go to Library</button>
                                 </div>
-                                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-6">
-                                    <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Translation</h3>
-                                    <p className="text-indigo-900 text-lg leading-relaxed">{activeTranslation}</p>
-                                </div>
-                                <button onClick={handleSave} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800">
-                                    Save to Collection
-                                </button>
-                            </div>
-                        )}
+                            ) : (
+                                <div 
+                                    className={`reader-text leading-loose`} 
+                                    style={{ fontSize: `${settings.fontSize}px` }}
+                                >
+                                    <div className="mb-8 border-b border-dashed border-current/10 pb-6">
+                                        <h2 className="text-4xl font-bold font-serif mb-2 tracking-tight">{activeArticle.title}</h2>
+                                        <p className={`text-sm opacity-50 ${theme.textMuted} font-mono`}>
+                                            {new Date(activeArticle.createdAt).toLocaleDateString()}
+                                            {groupData.siblings.length > 1 && ` • Chapter ${groupData.currentIndex + 1} of ${groupData.siblings.length}`}
+                                        </p>
+                                    </div>
+                                    
+                                    {settings.layoutMode === 'split' ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
+                                            {/* Split View Content */}
+                                            {activeArticle.sentences.map((sentence, idx) => (
+                                                <React.Fragment key={sentence.index}>
+                                                    <div className={`
+                                                        ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
+                                                        hover:bg-black/5 rounded p-1 -ml-1 transition-colors
+                                                    `}>
+                                                        {renderSentence(sentence)}
+                                                    </div>
+                                                    <div className={`
+                                                        ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
+                                                        ${theme.textMuted} font-sans leading-relaxed text-base flex items-center
+                                                        hover:bg-black/5 rounded p-1 -ml-1 transition-colors
+                                                    `}>
+                                                        {showTranslation && sentence.translation ? (
+                                                            <div className="pl-2 border-l-2 border-indigo-500/20 w-full">
+                                                                {sentence.translation}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="opacity-10 select-none w-full border-l-2 border-transparent pl-2">•</span>
+                                                        )}
+                                                    </div>
+                                                </React.Fragment>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        /* Inline View Content */
+                                        activeArticle.sentences.map((sentence, idx) => (
+                                            <React.Fragment key={sentence.index}>
+                                                {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
+                                                {renderSentence(sentence)}
+                                            </React.Fragment>
+                                        ))
+                                    )}
 
-                        {topCard && !error && (
+                                    {/* Bottom Chapter Navigation */}
+                                    <div className="mt-16 pt-8 border-t border-current/10 flex justify-between items-center gap-4">
+                                        {groupData.prev ? (
+                                            <button 
+                                                onClick={() => setActiveArticleId(groupData.prev!.id)}
+                                                className={`flex-1 p-4 rounded-xl border border-current/10 hover:bg-black/5 text-left transition-colors group flex flex-col`}
+                                            >
+                                                <span className="text-xs uppercase font-bold opacity-50 mb-1 flex items-center gap-1">
+                                                    <ArrowLeftIcon className="w-3 h-3" /> Previous
+                                                </span>
+                                                <span className="font-bold text-lg line-clamp-1 group-hover:underline">
+                                                    {groupData.prev.title}
+                                                </span>
+                                            </button>
+                                        ) : <div className="flex-1"></div>}
+
+                                        {groupData.next ? (
+                                            <button 
+                                                onClick={() => setActiveArticleId(groupData.next!.id)}
+                                                className={`flex-1 p-4 rounded-xl border border-current/10 hover:bg-black/5 text-right transition-colors group flex flex-col items-end`}
+                                            >
+                                                <span className="text-xs uppercase font-bold opacity-50 mb-1 flex items-center gap-1">
+                                                    Next <ArrowLeftIcon className="w-3 h-3 rotate-180" />
+                                                </span>
+                                                <span className="font-bold text-lg line-clamp-1 group-hover:underline">
+                                                    {groupData.next.title}
+                                                </span>
+                                            </button>
+                                        ) : <div className="flex-1"></div>}
+                                    </div>
+
+                                </div>
+                            )}
+                            
+                            {isTranslatingArticle && (
+                                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 text-sm animate-bounce z-50">
+                                    <span className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse"></span>
+                                    Translating in background...
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Floating Action Menu */}
+                    {selectionRect && !topCard && !activeTranslation && !error && (
+                        <div 
+                            className="absolute z-40 animate-fade-in-up"
+                            style={{ 
+                                top: selectionRect.bottom + (isInteractiveMode ? 20 : 15), 
+                                left: selectionRect.left + selectionRect.width / 2,
+                                transform: 'translateX(-50%)'
+                            }}
+                        >
+                            <button 
+                                onClick={handleTranslate}
+                                className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl hover:bg-black hover:scale-105 flex items-center gap-3 text-sm font-bold transition-all whitespace-nowrap border border-slate-700 ring-2 ring-white/20"
+                            >
+                                <SparklesIcon className="w-4 h-4 text-yellow-400" />
+                                {isLoading ? 'Thinking...' : (selectionScope === 'word' ? 'Explain Word' : 'Translate Sentence')}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Result Sheets */}
+                    {previousCard && (
+                        <DraggableSheet
+                            key={`prev-${previousCard.word}`}
+                            title={`Previous: ${previousCard.word}`}
+                            onClose={() => setWordCardStack(prev => prev.slice(0, -1))} 
+                            initialOffset={window.innerWidth >= 768 ? { x: -320, y: 0 } : { x: 0, y: -40 }}
+                            className="opacity-95 z-40 border-slate-300 shadow-xl"
+                        >
                             <VocabularyCard 
-                                data={topCard} 
-                                onSave={handleSave}
-                                onUpdate={(newData) => {
-                                    setWordCardStack(prev => [...prev.slice(0, -1), newData]);
-                                    setSavedItems(prevItems => {
-                                        const exists = prevItems.some(i => i.type === 'word' && i.original.toLowerCase() === newData.word.toLowerCase());
-                                        if (!exists) return prevItems;
-                                        
-                                        const updatedItems = prevItems.map(item => {
-                                            if (item.type === 'word' && item.original.toLowerCase() === newData.word.toLowerCase()) {
-                                                const updatedItem = {
-                                                    ...item,
-                                                    translation: newData.translation,
-                                                    cardData: newData
-                                                };
-                                                if(settings.dataSourceMode === 'server' && settings.serverUrl) {
-                                                    api.saveItem(settings.serverUrl, updatedItem).catch(console.error);
-                                                }
-                                                return updatedItem;
-                                            }
-                                            return item;
-                                        });
-                                        return updatedItems;
-                                    });
-                                }}
-                                isSaved={savedItems.some(i => i.original.toLowerCase() === topCard.word.toLowerCase())}
-                                canGoBack={wordCardStack.length > 1}
-                                onGoBack={() => setWordCardStack(prev => prev.slice(0, -1))}
-                                onExploreRelated={async (word) => {
-                                    setLoadingNextCard(true);
-                                    try {
-                                        const card = await fetchCardData(word);
-                                        setWordCardStack(prev => [...prev, card]);
-                                        trackWordUsage(word, activeArticle?.id || 'unknown', selectedSentenceIndex);
-                                    } catch(err: any) {
-                                        setToast(err.message);
-                                    } finally {
-                                        setLoadingNextCard(false);
-                                    }
-                                }}
-                                isLoading={loadingNextCard}
+                                data={previousCard} 
+                                isStacked={true}
+                                onGoBack={() => setWordCardStack(prev => prev.slice(0, -2).concat(prev.slice(-1)))}
+                                canGoBack={false} 
                             />
-                        )}
-                    </DraggableSheet>
-                )}
-            </>
-        )}
+                        </DraggableSheet>
+                    )}
+
+                    {(topCard || activeTranslation || error) && (
+                        <DraggableSheet
+                            key={topCard?.word || 'active'}
+                            title={topCard ? "Vocabulary Card" : (error ? "Error" : "Translation")}
+                            initialOffset={{ x: 0, y: 0 }}
+                            onClose={() => {
+                                setWordCardStack([]);
+                                setActiveTranslation(null);
+                                setError(null);
+                            }}
+                            className="z-50 border-indigo-100 shadow-2xl"
+                        >
+                            {error && (
+                                <div className="p-6 text-red-600 text-center flex flex-col items-center gap-4">
+                                    <p className="font-bold">{error}</p>
+                                    {error.includes('Quota') && (
+                                        <button 
+                                            onClick={() => setIsSettingsOpen(true)}
+                                            className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-bold shadow-lg"
+                                        >
+                                            Configure API Key
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTranslation && !error && (
+                                <div className="p-6 pb-12">
+                                    <div className="mb-4">
+                                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Original</h3>
+                                        <p className="text-slate-800 text-lg font-serif leading-relaxed">{selectedText}</p>
+                                    </div>
+                                    <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-6">
+                                        <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Translation</h3>
+                                        <p className="text-indigo-900 text-lg leading-relaxed">{activeTranslation}</p>
+                                    </div>
+                                    <button onClick={handleSave} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800">
+                                        Save to Collection
+                                    </button>
+                                </div>
+                            )}
+
+                            {topCard && !error && (
+                                <VocabularyCard 
+                                    data={topCard} 
+                                    onSave={handleSave}
+                                    onUpdate={(newData) => {
+                                        setWordCardStack(prev => [...prev.slice(0, -1), newData]);
+                                        setSavedItems(prevItems => {
+                                            const exists = prevItems.some(i => i.type === 'word' && i.original.toLowerCase() === newData.word.toLowerCase());
+                                            if (!exists) return prevItems;
+                                            
+                                            const updatedItems = prevItems.map(item => {
+                                                if (item.type === 'word' && item.original.toLowerCase() === newData.word.toLowerCase()) {
+                                                    const updatedItem = {
+                                                        ...item,
+                                                        translation: newData.translation,
+                                                        cardData: newData
+                                                    };
+                                                    if(settings.dataSourceMode === 'server' && settings.serverUrl) {
+                                                        api.saveItem(settings.serverUrl, updatedItem).catch(console.error);
+                                                    }
+                                                    return updatedItem;
+                                                }
+                                                return item;
+                                            });
+                                            return updatedItems;
+                                        });
+                                    }}
+                                    isSaved={savedItems.some(i => i.original.toLowerCase() === topCard.word.toLowerCase())}
+                                    canGoBack={wordCardStack.length > 1}
+                                    onGoBack={() => setWordCardStack(prev => prev.slice(0, -1))}
+                                    onExploreRelated={async (word) => {
+                                        setLoadingNextCard(true);
+                                        try {
+                                            const card = await fetchCardData(word);
+                                            setWordCardStack(prev => [...prev, card]);
+                                            trackWordUsage(word, activeArticle?.id || 'unknown', selectedSentenceIndex);
+                                        } catch(err: any) {
+                                            setToast(err.message);
+                                        } finally {
+                                            setLoadingNextCard(false);
+                                        }
+                                    }}
+                                    isLoading={loadingNextCard}
+                                />
+                            )}
+                        </DraggableSheet>
+                    )}
+                </>
+            )}
+        </div>
       </div>
 
       {/* Settings Modal */}
