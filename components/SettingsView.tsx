@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings, BackupData, Article, SavedItem, HistoryRecord, WordStatsMap, DataSourceMode, Theme, CustomApiConfig } from '../types';
-import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon, SparklesIcon, ClockIcon } from './Icons';
+import { DownloadIcon, UploadIcon, XMarkIcon, CogIcon, BrainIcon, BookOpenIcon, LinkIcon, CardIcon, PlusIcon, TrashIcon, SparklesIcon, ClockIcon, PencilIcon, CheckCircleIcon } from './Icons';
 import { api } from '../services/backendService';
 
 interface SettingsViewProps {
@@ -43,7 +43,24 @@ const OPENAI_BODY_TEMPLATE = `{
       "content": "Analyze the English word: '{{word}}'. Create a vocabulary card for a Chinese learner using Associative Memory techniques.\\n\\nReturn a JSON object with exactly these keys:\\n{\\n  \\"word\\": \\"{{word}}\\",\\n  \\"phonetic\\": \\"IPA\\",\\n  \\"translation\\": \\"Common meaning\\",\\n  \\"recorded_meanings\\": \\"Detailed dictionary definitions\\",\\n  \\"mnemonic_analysis\\": \\"Explain using sound/spelling/root associations in Chinese\\",\\n  \\"core_logic\\": \\"Abstract core concept (short)\\",\\n  \\"visual_image_prompt\\": \\"Description for a visual aid image\\",\\n  \\"scenario_sentence_en\\": \\"Example sentence\\",\\n  \\"scenario_sentence_cn\\": \\"Sentence translation\\",\\n  \\"related_word_suggestion\\": { \\"word\\": \\"related_word\\", \\"reason\\": \\"why\\" }\\n}"
     }
   ],
-  "temperature": 0.7
+  "temperature": 0.7,
+  "stream": false
+}`;
+
+const QWEN_BODY_TEMPLATE = `{
+  "model": "qwen-max",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an expert English vocabulary teacher. You MUST return valid JSON only. Do not wrap in markdown code blocks."
+    },
+    {
+      "role": "user",
+      "content": "Analyze the English word: '{{word}}'. Create a vocabulary card for a Chinese learner using Associative Memory techniques.\\n\\nReturn a JSON object with exactly these keys:\\n{\\n  \\"word\\": \\"{{word}}\\",\\n  \\"phonetic\\": \\"IPA\\",\\n  \\"translation\\": \\"Common meaning\\",\\n  \\"recorded_meanings\\": \\"Detailed dictionary definitions\\",\\n  \\"mnemonic_analysis\\": \\"Explain using sound/spelling/root associations in Chinese\\",\\n  \\"core_logic\\": \\"Abstract core concept (short)\\",\\n  \\"visual_image_prompt\\": \\"Description for a visual aid image\\",\\n  \\"scenario_sentence_en\\": \\"Example sentence\\",\\n  \\"scenario_sentence_cn\\": \\"Sentence translation\\",\\n  \\"related_word_suggestion\\": { \\"word\\": \\"related_word\\", \\"reason\\": \\"why\\" }\\n}"
+    }
+  ],
+  "temperature": 0.7,
+  "stream": false
 }`;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
@@ -58,6 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [activeTab, setActiveTab] = useState<'general' | 'advanced' | 'server'>('general');
   const [includeImages, setIncludeImages] = useState(false);
   const [serverStatus, setServerStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
+  const [presetMessage, setPresetMessage] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vocabInputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +87,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       { id: 'sepia', name: '羊皮纸 (Sepia)', color: '#f4ecd8' },
       { id: 'forest', name: '森林 (Forest)', color: '#0f291e' },
       { id: 'amethyst', name: '紫罗兰 (Amethyst)', color: '#2e1065' },
+      { id: 'custom', name: '自定义 (Custom)', color: 'linear-gradient(45deg, #ff9a9e 0%, #fad0c4 99%, #fad0c4 100%)' },
   ];
 
   // --- API Config Helpers ---
@@ -87,22 +106,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }));
   };
 
-  const applyPreset = () => {
-      if(!confirm("This will overwrite your current API settings. Continue?")) return;
+  const applyPreset = (type: 'openai' | 'qwen') => {
+      const isQwen = type === 'qwen';
+      // Removed confirm dialog to prevent blocking issues
       
       setLocalSettings(prev => ({
           ...prev,
+          dataSourceMode: 'custom_api', // Auto-switch to custom api
           customApiConfig: {
-              url: 'https://api.openai.com/v1/chat/completions',
+              url: isQwen 
+                ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' 
+                : 'https://api.openai.com/v1/chat/completions',
               method: 'POST',
               headers: [
                   { key: 'Content-Type', value: 'application/json' },
-                  { key: 'Authorization', value: 'Bearer YOUR_API_KEY_HERE' }
+                  { key: 'Authorization', value: isQwen ? 'Bearer YOUR_DASHSCOPE_KEY' : 'Bearer YOUR_API_KEY' }
               ],
-              bodyTemplate: OPENAI_BODY_TEMPLATE,
+              bodyTemplate: isQwen ? QWEN_BODY_TEMPLATE : OPENAI_BODY_TEMPLATE,
               responseMapping: 'choices[0].message.content'
           }
       }));
+
+      // Show temporary success message
+      setPresetMessage(isQwen ? "已加载通义千问预设 (Qwen Loaded)" : "Loaded OpenAI Preset");
+      setTimeout(() => setPresetMessage(null), 3000);
   };
 
   const addHeader = () => {
@@ -215,9 +242,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       reader.readAsText(file);
   };
 
+  // Helper for Custom Colors
+  const updateCustomColor = (key: 'appBg' | 'text' | 'headerBg' | 'accent', value: string) => {
+      setLocalSettings(prev => ({
+          ...prev,
+          customThemeColors: {
+              appBg: prev.customThemeColors?.appBg || '#ffffff',
+              text: prev.customThemeColors?.text || '#000000',
+              headerBg: prev.customThemeColors?.headerBg || '#f8fafc',
+              accent: prev.customThemeColors?.accent || '#6366f1',
+              ...prev.customThemeColors,
+              [key]: value
+          }
+      }));
+  };
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col overflow-hidden animate-slide-up-mobile md:animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col overflow-hidden animate-slide-up-mobile md:animate-fade-in relative">
+            
+            {/* Success Toast */}
+            {presetMessage && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-4 py-2 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 animate-fade-in-down">
+                    <CheckCircleIcon className="w-5 h-5" />
+                    {presetMessage}
+                </div>
+            )}
+
             {/* Header */}
             <div className="bg-slate-50 border-b border-slate-200 p-4 flex justify-between items-center shrink-0">
                 <h2 className="font-bold text-lg text-slate-800 flex items-center gap-2">
@@ -258,7 +309,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     {/* Theme Selector */}
                     <div>
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">界面主题 (Theme)</h3>
-                        <div className="flex gap-3 overflow-x-auto pb-2">
+                        <div className="flex flex-wrap gap-3 pb-2">
                             {themes.map(t => (
                                 <button
                                     key={t.id}
@@ -267,7 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 >
                                     <div 
                                         className={`w-12 h-12 rounded-full shadow-sm border-2 transition-all ${localSettings.theme === t.id ? 'border-indigo-600 scale-110' : 'border-slate-200 group-hover:border-slate-300'}`}
-                                        style={{ backgroundColor: t.color }}
+                                        style={{ background: t.color }}
                                     />
                                     <span className={`text-xs font-medium ${localSettings.theme === t.id ? 'text-indigo-600' : 'text-slate-500'}`}>
                                         {t.name}
@@ -275,6 +326,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 </button>
                             ))}
                         </div>
+                        
+                        {/* Custom Theme Colors Picker */}
+                        {localSettings.theme === 'custom' && (
+                            <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200 animate-fade-in-down">
+                                <div className="flex items-center gap-2 mb-3 text-sm font-bold text-slate-600">
+                                    <PencilIcon className="w-4 h-4" /> 自定义配色 (Color Palette)
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">背景色 (Background)</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="color" 
+                                                value={localSettings.customThemeColors?.appBg || '#ffffff'}
+                                                onChange={(e) => updateCustomColor('appBg', e.target.value)}
+                                                className="w-8 h-8 rounded cursor-pointer border-0"
+                                            />
+                                            <span className="text-xs font-mono">{localSettings.customThemeColors?.appBg}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">文字颜色 (Text)</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="color" 
+                                                value={localSettings.customThemeColors?.text || '#000000'}
+                                                onChange={(e) => updateCustomColor('text', e.target.value)}
+                                                className="w-8 h-8 rounded cursor-pointer border-0"
+                                            />
+                                            <span className="text-xs font-mono">{localSettings.customThemeColors?.text}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">顶部栏 (Header)</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="color" 
+                                                value={localSettings.customThemeColors?.headerBg || '#f8fafc'}
+                                                onChange={(e) => updateCustomColor('headerBg', e.target.value)}
+                                                className="w-8 h-8 rounded cursor-pointer border-0"
+                                            />
+                                            <span className="text-xs font-mono">{localSettings.customThemeColors?.headerBg}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">强调色 (Accent)</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="color" 
+                                                value={localSettings.customThemeColors?.accent || '#6366f1'}
+                                                onChange={(e) => updateCustomColor('accent', e.target.value)}
+                                                className="w-8 h-8 rounded cursor-pointer border-0"
+                                            />
+                                            <span className="text-xs font-mono">{localSettings.customThemeColors?.accent}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Data Source Basic */}
@@ -448,19 +558,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 <SparklesIcon className="w-4 h-4 text-indigo-500" />
                             </div>
                             <p className="text-xs text-indigo-600 mb-3">
-                                Use this to quickly configure OpenAI-compatible APIs (DeepSeek, Moonshot, etc).
+                                Use these to quickly configure Custom API for other providers.
                             </p>
-                            <button 
-                                onClick={applyPreset}
-                                className="w-full py-2 bg-white border border-indigo-200 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 transition-colors shadow-sm"
-                            >
-                                Load Preset: OpenAI / Compatible
-                            </button>
+                            <div className="flex flex-col gap-2">
+                                <button 
+                                    onClick={() => applyPreset('qwen')}
+                                    className="w-full py-2 bg-white border border-indigo-200 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 transition-colors shadow-sm text-left px-4 flex items-center justify-between"
+                                >
+                                    <span>Load Preset: Alibaba Qwen (通义千问)</span>
+                                    <span className="text-[10px] bg-indigo-100 px-2 py-0.5 rounded text-indigo-600">Recommmended</span>
+                                </button>
+                                <button 
+                                    onClick={() => applyPreset('openai')}
+                                    className="w-full py-2 bg-white border border-indigo-200 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 transition-colors shadow-sm text-left px-4"
+                                >
+                                    Load Preset: OpenAI / Compatible
+                                </button>
+                            </div>
                         </div>
 
                         {/* Warning */}
                         <div className="bg-amber-50 p-3 rounded text-xs text-amber-800 leading-relaxed border border-amber-100">
-                            <strong>Note:</strong> Custom API mode requires you to configure the request manually. Ensure your model returns the correct JSON structure (see bottom).
+                            <strong>Note:</strong> Ensure you replace <code>YOUR_API_KEY</code> in Headers below with your actual key.
                         </div>
 
                         {/* Configuration Form */}

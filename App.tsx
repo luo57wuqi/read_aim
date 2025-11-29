@@ -1,17 +1,18 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
-import { fetchFromCustomApi } from './services/customApiService';
+import { fetchFromCustomApi, translateWithCustomApi, translateBatchWithCustomApi } from './services/customApiService';
 import { api } from './services/backendService';
-import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData } from './types';
+import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData, ReadingSession } from './types';
 import { Sidebar } from './components/Sidebar';
 import { VocabularyCard } from './components/VocabularyCard';
 import { DraggableSheet } from './components/DraggableSheet';
 import { StatsView } from './components/StatsView';
 import { ArticleLibrary } from './components/ArticleLibrary';
 import { SettingsView } from './components/SettingsView';
-import { processTextToArticle } from './utils/textHelpers';
-import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon } from './components/Icons';
+import { ReadingDashboard } from './components/ReadingDashboard'; // Import Dashboard
+import { processTextToArticle, countWordStats } from './utils/textHelpers';
+import { BookOpenIcon, ColumnsIcon, BookmarkIcon, SparklesIcon, TouchIcon, CheckCircleIcon, ChartBarIcon, LanguageIcon, CogIcon, ListBulletIcon, SunIcon, MoonIcon, TextSizeIcon, ClockIcon } from './components/Icons';
 
 const DEFAULT_TEXT = `The concept of serendipity often plays a crucial role in scientific discovery. Many breakthrough inventions were not the result of rigorous planning, but rather happy accidents that occurred while researchers were looking for something else. For instance, penicillin was discovered when Alexander Fleming returned from a holiday to find that mold had killed bacteria in a petri dish he had left uncovered. This illustrates that while method is important, maintaining an open mind to the unexpected is equally vital for progress.`;
 
@@ -19,7 +20,15 @@ const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-2.5-flash',
     dataSourceMode: 'ai',
     theme: 'light',
-    serverUrl: 'http://localhost:5000'
+    serverUrl: 'http://localhost:5000',
+    fontSize: 18,
+    layoutMode: 'inline',
+    customThemeColors: {
+        appBg: '#ffffff',
+        text: '#000000',
+        headerBg: '#f8fafc',
+        accent: '#6366f1'
+    }
 };
 
 function App() {
@@ -33,6 +42,7 @@ function App() {
   // Stats State
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [wordStats, setWordStats] = useState<WordStatsMap>({});
+  const [readingSessions, setReadingSessions] = useState<ReadingSession[]>([]);
   
   // Saved Items
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -71,8 +81,12 @@ function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [readingProgress, setReadingProgress] = useState(0);
 
+  // Refs for Session Tracking
   const containerRef = useRef<HTMLDivElement>(null);
   const sentenceRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const sessionStartTimeRef = useRef<number>(0);
+  const sessionMaxProgressRef = useRef<number>(0);
+  const previousArticleIdRef = useRef<string | null>(null);
 
   // --- Initialization & Persistence ---
 
@@ -80,7 +94,8 @@ function App() {
   useEffect(() => {
     const savedSettings = localStorage.getItem('english_reader_settings');
     if (savedSettings) {
-        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
+        const parsed = JSON.parse(savedSettings);
+        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
     }
   }, []);
 
@@ -92,6 +107,7 @@ function App() {
         const articlesLocal = JSON.parse(localStorage.getItem('english_reader_articles') || '[]');
         const historyLocal = JSON.parse(localStorage.getItem('english_reader_history_records') || '[]');
         const statsLocal = JSON.parse(localStorage.getItem('english_reader_word_stats') || '{}');
+        const sessionsLocal = JSON.parse(localStorage.getItem('english_reader_sessions') || '[]');
 
         if (settings.dataSourceMode === 'server' && settings.serverUrl) {
             try {
@@ -107,12 +123,11 @@ function App() {
                 // Note: History and Stats are currently still local-only for simplicity in this iteration
                 setHistoryRecords(historyLocal);
                 setWordStats(statsLocal);
+                setReadingSessions(sessionsLocal);
                 
                 if (serverArticles.length > 0 && !activeArticleId) {
                     setActiveArticleId(serverArticles[0].id);
                 } else if (serverArticles.length === 0) {
-                    // If server is empty but connected, maybe don't show default? Or show default.
-                    // Let's show default if absolutely nothing
                     createDefaultArticle();
                 }
             } catch (err) {
@@ -122,6 +137,7 @@ function App() {
                 setSavedItems(savedItemsLocal);
                 setHistoryRecords(historyLocal);
                 setWordStats(statsLocal);
+                setReadingSessions(sessionsLocal);
                 if (articlesLocal.length === 0) createDefaultArticle();
             }
         } else {
@@ -130,24 +146,23 @@ function App() {
             setSavedItems(savedItemsLocal);
             setHistoryRecords(historyLocal);
             setWordStats(statsLocal);
+            setReadingSessions(sessionsLocal);
             if (articlesLocal.length === 0) createDefaultArticle();
         }
     };
 
     loadData();
-  }, [settings.dataSourceMode, settings.serverUrl]); // Reload when mode changes
+  }, [settings.dataSourceMode, settings.serverUrl]); 
 
   // Persist State (Handles Local vs Server Saving)
-  // We separate the useEffects to avoid infinite loops and handle specific saving logic
-
-  // Local Persistence (Always backup to local)
   useEffect(() => {
       localStorage.setItem('english_reader_saved_items', JSON.stringify(savedItems));
       localStorage.setItem('english_reader_articles', JSON.stringify(articles));
       localStorage.setItem('english_reader_history_records', JSON.stringify(historyRecords));
       localStorage.setItem('english_reader_word_stats', JSON.stringify(wordStats));
+      localStorage.setItem('english_reader_sessions', JSON.stringify(readingSessions));
       localStorage.setItem('english_reader_settings', JSON.stringify(settings));
-  }, [savedItems, articles, historyRecords, wordStats, settings]);
+  }, [savedItems, articles, historyRecords, wordStats, settings, readingSessions]);
 
   const createDefaultArticle = () => {
       const sentences = processTextToArticle(DEFAULT_TEXT);
@@ -166,42 +181,70 @@ function App() {
   const activeArticle = articles.find(a => a.id === activeArticleId);
   const topCard = wordCardStack.length > 0 ? wordCardStack[wordCardStack.length - 1] : null;
   const previousCard = wordCardStack.length > 1 ? wordCardStack[wordCardStack.length - 2] : null;
+  
+  // Filter sessions for the current article
+  const currentArticleSessions = readingSessions
+    .filter(s => s.articleId === activeArticleId)
+    .sort((a, b) => b.startTime - a.startTime); // Newest first
+
+  // Article Stats
+  const articleStats = activeArticle 
+      ? countWordStats(activeArticle.sentences.map(s => s.text).join(' ')) 
+      : { enCount: 0, cnCount: 0, readingTimeMin: 0 };
 
   // --- Theme Engine ---
   const getThemePalette = () => {
+      if (settings.theme === 'custom' && settings.customThemeColors) {
+          return {
+              appBg: 'transition-colors duration-500', 
+              text: 'transition-colors duration-500',
+              textMuted: 'opacity-60',
+              headerBg: 'backdrop-blur-md border-b',
+              paperBg: '', 
+              shadow: 'shadow-2xl',
+              accent: 'transition-colors duration-500',
+              highlight: 'bg-white/20',
+              selection: 'bg-white/30',
+              isCustom: true
+          };
+      }
+
       switch(settings.theme) {
           case 'dark': return {
-              appBg: 'bg-slate-950',
+              appBg: 'bg-[#0f1115]',
               text: 'text-slate-200',
-              textMuted: 'text-slate-400',
-              headerBg: 'bg-slate-900/90 border-slate-800',
-              paperBg: 'bg-slate-900 border-slate-800',
+              textMuted: 'text-slate-500',
+              headerBg: 'bg-[#0f1115]/90 border-slate-800',
+              paperBg: 'bg-[#15171b] border-slate-800',
               shadow: 'shadow-2xl shadow-black/50',
               accent: 'text-indigo-400',
               highlight: 'bg-indigo-500/30 text-indigo-100',
-              selection: 'bg-indigo-500/40'
+              selection: 'bg-indigo-500/40',
+              isCustom: false
           };
           case 'sepia': return {
-              appBg: 'bg-[#f0e6d2]', 
-              text: 'text-[#5f4b32]',
+              appBg: 'bg-[#f4ecd8]', 
+              text: 'text-[#433422]',
               textMuted: 'text-[#8c7b66]',
-              headerBg: 'bg-[#fcf7ea]/90 border-[#e8dfcc]',
-              paperBg: 'bg-[#fcf7ea] border-[#e8dfcc]', 
+              headerBg: 'bg-[#f4ecd8]/90 border-[#e8dfcc]',
+              paperBg: 'bg-[#fdf6e3] border-[#e8dfcc]', 
               shadow: 'shadow-xl shadow-[#5f4b32]/10',
               accent: 'text-[#b08d55]',
               highlight: 'bg-[#b08d55]/20 text-[#5f4b32]',
-              selection: 'bg-[#b08d55]/30'
+              selection: 'bg-[#b08d55]/30',
+              isCustom: false
           };
           case 'forest': return {
-              appBg: 'bg-[#0f291e]', 
-              text: 'text-[#e2e8f0]',
-              textMuted: 'text-[#94a3b8]',
-              headerBg: 'bg-[#1a4233]/90 border-[#245c48]',
-              paperBg: 'bg-[#1a4233] border-[#245c48]', 
+              appBg: 'bg-[#1c211f]', 
+              text: 'text-[#c6d1cc]',
+              textMuted: 'text-[#6e7d77]',
+              headerBg: 'bg-[#1c211f]/90 border-[#2a302d]',
+              paperBg: 'bg-[#232926] border-[#2a302d]', 
               shadow: 'shadow-2xl shadow-black/60',
               accent: 'text-[#4ade80]',
               highlight: 'bg-[#4ade80]/20 text-[#ecfdf5]',
-              selection: 'bg-[#4ade80]/30'
+              selection: 'bg-[#4ade80]/30',
+              isCustom: false
           };
           case 'amethyst': return {
               appBg: 'bg-[#1e1b2e]', 
@@ -212,28 +255,36 @@ function App() {
               shadow: 'shadow-2xl shadow-[#120f1f]/80',
               accent: 'text-[#d8b4fe]',
               highlight: 'bg-[#d8b4fe]/20 text-[#f3e8ff]',
-              selection: 'bg-[#d8b4fe]/30'
+              selection: 'bg-[#d8b4fe]/30',
+              isCustom: false
           };
           case 'light': 
           default: return {
-              appBg: 'bg-slate-100', 
-              text: 'text-slate-800',
-              textMuted: 'text-slate-500',
-              headerBg: 'bg-white/90 border-slate-200',
-              paperBg: 'bg-white border-slate-200', 
-              shadow: 'shadow-xl shadow-slate-200/60',
+              appBg: 'bg-[#f8f9fa]', // More refined light grey
+              text: 'text-[#2d333b]', // Softer black
+              textMuted: 'text-[#8590a6]',
+              headerBg: 'bg-white/90 border-slate-100',
+              paperBg: 'bg-white border-transparent', // Clean white paper
+              shadow: 'shadow-[0_8px_30px_rgb(0,0,0,0.04)]',
               accent: 'text-indigo-600',
               highlight: 'bg-indigo-50 text-indigo-900',
-              selection: 'bg-indigo-100'
+              selection: 'bg-indigo-100',
+              isCustom: false
           };
       }
   };
   
   const theme = getThemePalette();
 
+  // Custom CSS vars for dynamic theme
+  const customStyle = theme.isCustom ? {
+      backgroundColor: settings.customThemeColors?.appBg,
+      color: settings.customThemeColors?.text,
+  } : {};
+
   // --- Effects ---
 
-  // Handle Scroll / Progress
+  // Handle Scroll / Progress AND Track Max Progress
   const handleScroll = () => {
     const element = containerRef.current;
     if (!element) return;
@@ -241,9 +292,16 @@ function App() {
     const totalScroll = scrollHeight - clientHeight;
     if (totalScroll <= 0) {
       setReadingProgress(100);
+      sessionMaxProgressRef.current = 100;
       return;
     }
-    setReadingProgress(Math.min(100, Math.max(0, (scrollTop / totalScroll) * 100)));
+    const currentProg = Math.min(100, Math.max(0, (scrollTop / totalScroll) * 100));
+    setReadingProgress(currentProg);
+    
+    // Update max progress for current session
+    if (currentProg > sessionMaxProgressRef.current) {
+        sessionMaxProgressRef.current = currentProg;
+    }
   };
 
   useEffect(() => {
@@ -253,7 +311,44 @@ function App() {
         window.removeEventListener('resize', handleScroll);
         clearTimeout(timer);
     };
-  }, [activeArticle, viewMode, showTranslation]); 
+  }, [activeArticle, viewMode, showTranslation, settings.fontSize, settings.layoutMode]); 
+
+  // Session Tracking Logic
+  useEffect(() => {
+      // 1. End previous session if exists
+      if (previousArticleIdRef.current) {
+          const endTime = Date.now();
+          const duration = (endTime - sessionStartTimeRef.current) / 1000;
+          
+          // Only log if duration > 10 seconds to avoid noise
+          if (duration > 10) { 
+              const prevArticle = articles.find(a => a.id === previousArticleIdRef.current);
+              if (prevArticle) {
+                  const newSession: ReadingSession = {
+                      id: Date.now().toString() + Math.random().toString().slice(2, 5),
+                      articleId: prevArticle.id,
+                      articleTitle: prevArticle.title,
+                      startTime: sessionStartTimeRef.current,
+                      endTime: endTime,
+                      durationSeconds: Math.floor(duration),
+                      maxProgress: Math.floor(sessionMaxProgressRef.current)
+                  };
+                  setReadingSessions(prev => [newSession, ...prev]);
+              }
+          }
+      }
+
+      // 2. Start new session
+      if (activeArticleId && viewMode === ViewMode.READ) {
+          sessionStartTimeRef.current = Date.now();
+          sessionMaxProgressRef.current = 0;
+          previousArticleIdRef.current = activeArticleId;
+          setReadingProgress(0); // Reset UI progress
+      } else {
+          // If leaving read mode, end session
+          previousArticleIdRef.current = null;
+      }
+  }, [activeArticleId, viewMode]); // Added viewMode to dep to stop session when going to Library/Stats
 
   // Auto-scroll to highlight sentence
   useEffect(() => {
@@ -286,6 +381,7 @@ function App() {
       setHistoryRecords(data.historyRecords);
       setWordStats(data.wordStats);
       setSettings(data.settings);
+      setReadingSessions(data.sessions || []);
       
       if (data.articles.length > 0) setActiveArticleId(data.articles[0].id);
       setToast("Data restored successfully!");
@@ -311,7 +407,6 @@ function App() {
           return merged;
       });
 
-      // Sync merge to server if enabled
       if (settings.dataSourceMode === 'server' && settings.serverUrl) {
           newItemsToAdd.forEach(item => {
               api.saveItem(settings.serverUrl, item).catch(e => console.error("Sync merge failed", e));
@@ -322,8 +417,15 @@ function App() {
   };
 
   const toggleTranslation = async () => {
+    
     const nextState = !showTranslation;
     setShowTranslation(nextState);
+
+    // AUTO SWITCH LAYOUT
+    setSettings(prev => ({
+        ...prev,
+        layoutMode: nextState ? 'split' : 'inline'
+    }));
 
     if (nextState && activeArticle) {
         const needsTranslation = activeArticle.sentences.some(s => !s.translation);
@@ -342,7 +444,14 @@ function App() {
                     
                     if (chunkIndices.length > 0) {
                         const textsToTranslate = chunkIndices.map(item => item.s.text);
-                        const translations = await translateBatch(textsToTranslate, settings);
+                        let translations: string[] = [];
+                        
+                        // Switch between Custom API and Gemini
+                        if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig) {
+                            translations = await translateBatchWithCustomApi(textsToTranslate, settings.customApiConfig);
+                        } else {
+                            translations = await translateBatch(textsToTranslate, settings);
+                        }
                         
                         chunkIndices.forEach((item, idx) => {
                            if (translations[idx]) {
@@ -366,9 +475,16 @@ function App() {
                 }
 
                 setToast("Translation complete!");
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Translation failed", err);
-                setError("Could not translate entire article. Try again later.");
+                const errStr = err.toString();
+                const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('RESOURCE_EXHAUSTED');
+                
+                if (isQuota) {
+                    setError("API Quota Exceeded (429). Please switch to 'Custom API' in Settings.");
+                } else {
+                    setError("Could not translate entire article. Try again later.");
+                }
             } finally {
                 setIsTranslatingArticle(false);
             }
@@ -436,35 +552,27 @@ function App() {
   };
 
   const fetchCardData = async (word: string, context?: string): Promise<WordCardData> => {
-      console.log("Fetching card data for:", word);
-
-      // 1. Check Local "SavedItems" (Fastest)
       const cachedItem = savedItems.find(i => 
           i.type === 'word' && i.original.trim().toLowerCase() === word.trim().toLowerCase()
       );
       
       if (cachedItem && cachedItem.cardData) {
-          console.log("Found local cache:", cachedItem.original);
           return { ...cachedItem.cardData };
       }
 
-      // 2. Check "Local Only" mode
       if (settings.dataSourceMode === 'local_only') {
           throw new Error(`"${word}" not found in collection. Switch to AI mode to generate.`);
       }
 
-      // 3. Custom API Mode
       if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig?.url) {
           try {
               return await fetchFromCustomApi(word, settings.customApiConfig);
           } catch (e: any) {
               console.error(e);
-              throw new Error(`Custom API Error: ${e.message}`);
+              throw new Error(e.message);
           }
       }
 
-      // 4. AI / Network Generation (Gemini)
-      // Works in 'ai' mode AND 'server' mode (server mode saves the result later)
       return await generateWordCard(word, context, settings);
   };
 
@@ -493,7 +601,15 @@ function App() {
              if (settings.dataSourceMode === 'local_only') {
                  throw new Error("Translation not available offline.");
              }
-             const translation = await translateText(selectedText, settings);
+             
+             let translation = '';
+             // Switch between Custom API and Gemini for sentence translation
+             if (settings.dataSourceMode === 'custom_api' && settings.customApiConfig) {
+                 translation = await translateWithCustomApi(selectedText, settings.customApiConfig);
+             } else {
+                 translation = await translateText(selectedText, settings);
+             }
+
              setActiveTranslation(translation);
              
              // Save sentence translation back to article
@@ -513,7 +629,14 @@ function App() {
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to process request.");
+      const errStr = err.toString();
+      const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('RESOURCE_EXHAUSTED');
+      
+      if (isQuota) {
+          setError("API Quota Exceeded (429). Please switch to 'Custom API' in Settings.");
+      } else {
+          setError(err.message || "Failed to process request.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -633,6 +756,50 @@ function App() {
           await api.deleteArticle(settings.serverUrl, id);
       }
   };
+  
+  // Toggle Theme between Light and Dark
+  const toggleNightMode = () => {
+      setSettings(prev => ({
+          ...prev,
+          theme: prev.theme === 'dark' ? 'light' : 'dark'
+      }));
+  };
+  
+  // Toggle Layout Mode
+  const toggleLayoutMode = () => {
+      setSettings(prev => ({
+          ...prev,
+          layoutMode: prev.layoutMode === 'split' ? 'inline' : 'split'
+      }));
+  };
+  
+  // Change Font Size
+  const changeFontSize = (delta: number) => {
+      setSettings(prev => ({
+          ...prev,
+          fontSize: Math.max(12, Math.min(32, prev.fontSize + delta))
+      }));
+  };
+
+  const renderInteractiveToken = (token: string, sentence: Sentence, tIdx: number) => {
+      const isWord = /^[a-zA-Z0-9_'-]+$/.test(token);
+      if (isWord) {
+          return (
+              <span
+                key={tIdx}
+                onClick={(e) => handleInteractiveClick(e, token, sentence, 'word')}
+                className={`rounded px-0.5 transition-colors duration-200 
+                    ${selectedText === token && !activeTranslation 
+                        ? 'bg-indigo-500 text-white shadow-sm' 
+                        : `hover:opacity-80 hover:underline decoration-2 decoration-indigo-400/50`
+                    }`}
+              >
+                  {token}
+              </span>
+          );
+      }
+      return <span key={tIdx}>{token}</span>;
+  };
 
   const renderSentence = (sentence: Sentence) => {
       const sentenceContent = (
@@ -643,25 +810,7 @@ function App() {
             id={`sentence-${sentence.index}`}
           >
              {isInteractiveMode && selectionScope === 'word' ? (
-                 sentence.text.split(/([a-zA-Z0-9_'-]+)/g).map((token, tIdx) => {
-                      const isWord = /^[a-zA-Z0-9_'-]+$/.test(token);
-                      if (isWord) {
-                          return (
-                              <span
-                                key={tIdx}
-                                onClick={(e) => handleInteractiveClick(e, token, sentence, 'word')}
-                                className={`rounded px-0.5 transition-colors duration-200 
-                                    ${selectedText === token && !activeTranslation 
-                                        ? 'bg-indigo-500 text-white shadow-sm' 
-                                        : `hover:opacity-80 hover:underline decoration-2 decoration-indigo-400/50`
-                                    }`}
-                              >
-                                  {token}
-                              </span>
-                          );
-                      }
-                      return <span key={tIdx}>{token}</span>;
-                  })
+                 sentence.text.split(/([a-zA-Z0-9_'-]+)/g).map((token, tIdx) => renderInteractiveToken(token, sentence, tIdx))
              ) : (
                  <span
                     onClick={(e) => handleInteractiveClick(e, sentence.text, sentence, 'sentence')}
@@ -673,21 +822,30 @@ function App() {
           </span>
       );
 
-      return (
-          <div className="mb-1 inline" key={sentence.index}>
-              {sentenceContent}
-              {showTranslation && sentence.translation && (
-                  <div className={`block mt-2 mb-4 text-sm font-sans border-l-2 pl-3 py-1 ${theme.textMuted} border-indigo-500/30`}>
-                      {sentence.translation}
-                  </div>
-              )}
-              {' '} 
-          </div>
-      );
+      // Inline Rendering Logic
+      if (settings.layoutMode === 'inline') {
+        return (
+            <div className="mb-1 inline" key={sentence.index}>
+                {sentenceContent}
+                {showTranslation && sentence.translation && (
+                    <div className={`block mt-2 mb-4 text-sm font-sans border-l-2 pl-3 py-1 ${theme.textMuted} border-indigo-500/30`}>
+                        {sentence.translation}
+                    </div>
+                )}
+                {' '} 
+            </div>
+        );
+      }
+      
+      // Split View Rendering: Just return the content, grid handles layout
+      return sentenceContent;
   };
 
   return (
-    <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-500 ${theme.appBg} ${theme.text}`}>
+    <div 
+        className={`flex h-screen overflow-hidden font-sans transition-colors duration-500 ${theme.appBg} ${theme.text}`}
+        style={customStyle}
+    >
       {/* Toast */}
       {toast && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-fade-in-down pointer-events-none">
@@ -702,37 +860,83 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 relative">
         
         {/* Header */}
-        <header className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors backdrop-blur-md border-b ${theme.headerBg}`}>
+        <header 
+            className={`h-16 flex items-center justify-between px-4 sm:px-6 z-10 gap-2 sm:gap-4 transition-colors ${theme.headerBg}`}
+            style={theme.isCustom ? { backgroundColor: settings.customThemeColors?.headerBg } : {}}
+        >
           <div 
-            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
-            onClick={() => setViewMode(ViewMode.LIBRARY)}
+            className="flex items-center gap-3 min-w-0"
           >
-            <div className="bg-indigo-600 p-2 rounded-lg hidden sm:block shrink-0 shadow-lg shadow-indigo-600/20">
+            <button
+                className="bg-indigo-600 p-2 rounded-lg hidden sm:block shrink-0 shadow-lg shadow-indigo-600/20 hover:scale-105 transition-transform"
+                onClick={() => setViewMode(ViewMode.LIBRARY)}
+            >
                 <BookOpenIcon className="w-5 h-5 text-white" />
-            </div>
-            <div className="overflow-hidden">
-                <h1 className="font-bold text-lg truncate tracking-tight">
+            </button>
+            <div className="flex flex-col overflow-hidden cursor-pointer" onClick={() => setViewMode(ViewMode.LIBRARY)}>
+                <h1 className="font-bold text-lg truncate tracking-tight leading-tight">
                     {viewMode === ViewMode.LIBRARY ? 'Library' : (viewMode === ViewMode.STATS ? 'Analytics' : (activeArticle?.title || 'Reader'))}
                 </h1>
+                
+                {/* Stats in Header as requested */}
+                {viewMode === ViewMode.READ && activeArticle && (
+                    <div className="flex items-center gap-2 text-[10px] uppercase font-bold opacity-60">
+                        <span>{articleStats.enCount} Words</span>
+                        <span className="w-1 h-1 rounded-full bg-current"></span>
+                        <span>{articleStats.readingTimeMin} Min</span>
+                    </div>
+                )}
             </div>
           </div>
           
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {viewMode === ViewMode.READ && (
-                <>
+                <>  
+                    {/* Appearance Controls */}
+                    <div className="flex items-center bg-black/5 rounded-lg mr-2 p-1 hidden md:flex">
+                        <button 
+                            onClick={() => changeFontSize(-1)}
+                            className="p-1 hover:bg-white/50 rounded text-xs font-bold w-6 h-6 flex items-center justify-center transition-colors"
+                            title="Decrease Font Size"
+                        >
+                            A-
+                        </button>
+                        <TextSizeIcon className="w-4 h-4 mx-1 opacity-50" />
+                        <button 
+                            onClick={() => changeFontSize(1)}
+                            className="p-1 hover:bg-white/50 rounded text-xs font-bold w-6 h-6 flex items-center justify-center transition-colors"
+                            title="Increase Font Size"
+                        >
+                            A+
+                        </button>
+                    </div>
+
+                    <button 
+                        onClick={toggleNightMode}
+                        className={`p-2 rounded-md transition-all ${settings.theme === 'dark' ? 'bg-indigo-500/20 text-indigo-300' : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
+                        title="Toggle Night Mode"
+                    >
+                         {settings.theme === 'dark' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
+                    </button>
+                    
+                    {/* Translate Button - Now Toggles Split Mode */}
                     <button 
                         onClick={toggleTranslation}
-                        className={`p-2 rounded-md transition-all flex items-center gap-1 ${showTranslation ? theme.highlight : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
-                        title={showTranslation ? "Hide Translation" : "Show Chinese Translation"}
+                        className={`px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 border font-bold text-xs ml-2
+                        ${showTranslation 
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20' 
+                            : 'bg-transparent border-current opacity-60 hover:opacity-100'
+                        }`}
+                        title={showTranslation ? "Hide Translation" : "Split View & Translate"}
                     >
-                        <LanguageIcon className="w-5 h-5" />
-                        <span className="text-xs font-bold hidden sm:inline">CN</span>
-                        {isTranslatingArticle && <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />}
+                        <LanguageIcon className="w-4 h-4" />
+                        <span className="hidden sm:inline">Translate</span>
+                        {isTranslatingArticle && <span className="w-2 h-2 rounded-full bg-white animate-pulse" />}
                     </button>
 
-                    <div className="w-px h-6 bg-current opacity-10 mx-1 hidden sm:block"></div>
+                    <div className="w-px h-6 bg-current opacity-10 mx-2 hidden sm:block"></div>
 
-                    <div className="flex bg-black/5 p-1 rounded-lg mr-2 hidden md:flex">
+                    <div className="flex bg-black/5 p-1 rounded-lg mr-2 hidden lg:flex">
                         <button 
                             onClick={() => setSelectionScope('word')}
                             className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${selectionScope === 'word' ? 'bg-white text-indigo-700 shadow-sm' : 'text-inherit opacity-60 hover:opacity-100'}`}
@@ -776,6 +980,7 @@ function App() {
             <button 
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                 className={`p-2 rounded-md hover:bg-black/5 transition-all ${isSidebarOpen ? theme.accent : 'opacity-60'}`}
+                style={theme.isCustom ? { color: settings.customThemeColors?.accent } : {}}
             >
                 <BookmarkIcon className="w-5 h-5" solid={isSidebarOpen} />
             </button>
@@ -788,6 +993,7 @@ function App() {
                 history={historyRecords} 
                 wordStats={wordStats}
                 articles={articles}
+                sessions={readingSessions}
                 currentArticleId={activeArticleId || undefined}
                 onClose={() => setViewMode(ViewMode.READ)}
                 onNavigateToContext={handleJumpToContext} 
@@ -806,25 +1012,40 @@ function App() {
         ) : (
             <>
                 {/* READ MODE */}
+                
+                {/* Dashboard: Floating on Right Side (Center) */}
+                {viewMode === ViewMode.READ && activeArticle && (
+                    <ReadingDashboard 
+                        wordCount={articleStats.enCount} 
+                        progress={readingProgress}
+                        isActive={!isSettingsOpen && !isSidebarOpen}
+                        themeAccent={theme.accent}
+                        sessions={currentArticleSessions}
+                    />
+                )}
+
+                {/* Progress Bar (Top) */}
                 <div className="w-full h-1 bg-black/5 relative z-20">
                     <div 
                         className="h-full bg-indigo-500 transition-all duration-150 ease-out"
-                        style={{ width: `${readingProgress}%` }}
+                        style={{ width: `${readingProgress}%`, backgroundColor: theme.isCustom ? settings.customThemeColors?.accent : undefined }}
                     />
                 </div>
 
                 <div 
                     ref={containerRef}
                     onScroll={handleScroll}
-                    className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 relative pb-24"
+                    className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 relative pb-24 scroll-smooth"
                     onClick={() => {
                         setSelectedText(null);
                         setSelectionRect(null);
                         setWordCardStack([]);
                     }}
                 >
-                    <div className={`max-w-3xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-500 
-                        ${theme.paperBg} ${theme.text} ${theme.shadow} border
+                    <div className={`max-w-4xl mx-auto min-h-[60vh] p-8 sm:p-12 rounded-xl relative transition-all duration-500 
+                        ${theme.paperBg} ${theme.shadow} border
+                        ${settings.layoutMode === 'split' ? 'max-w-[90rem]' : ''}
+                        ${theme.isCustom ? 'bg-white/5 backdrop-blur-sm border-white/10' : ''}
                         `}
                     >
                         {!activeArticle ? (
@@ -833,21 +1054,60 @@ function App() {
                                 <button onClick={() => setViewMode(ViewMode.LIBRARY)} className="text-indigo-500 hover:underline">Go to Library</button>
                             </div>
                         ) : (
-                            <div className={`reader-text text-lg sm:text-xl leading-loose`}>
-                                <h2 className="text-3xl font-bold mb-8 font-serif">{activeArticle.title}</h2>
-                                {activeArticle.sentences.map((sentence, idx) => (
-                                    <React.Fragment key={sentence.index}>
-                                        {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
-                                        {renderSentence(sentence)}
-                                    </React.Fragment>
-                                ))}
+                            <div 
+                                className={`reader-text leading-loose`} 
+                                style={{ fontSize: `${settings.fontSize}px` }}
+                            >
+                                <div className="mb-8 border-b border-dashed border-current/10 pb-6">
+                                    <h2 className="text-4xl font-bold font-serif mb-2 tracking-tight">{activeArticle.title}</h2>
+                                    <p className={`text-sm opacity-50 ${theme.textMuted} font-mono`}>
+                                        {new Date(activeArticle.createdAt).toLocaleDateString()}
+                                    </p>
+                                </div>
+                                
+                                {settings.layoutMode === 'split' ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
+                                        {/* Split View Content */}
+                                        {activeArticle.sentences.map((sentence, idx) => (
+                                            <React.Fragment key={sentence.index}>
+                                                <div className={`
+                                                    ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
+                                                    hover:bg-black/5 rounded p-1 -ml-1 transition-colors
+                                                `}>
+                                                     {renderSentence(sentence)}
+                                                </div>
+                                                <div className={`
+                                                    ${sentence.isParagraphStart && idx > 0 ? 'mt-8' : ''} 
+                                                    ${theme.textMuted} font-sans leading-relaxed text-base flex items-center
+                                                    hover:bg-black/5 rounded p-1 -ml-1 transition-colors
+                                                `}>
+                                                    {showTranslation && sentence.translation ? (
+                                                        <div className="pl-2 border-l-2 border-indigo-500/20 w-full">
+                                                            {sentence.translation}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="opacity-10 select-none w-full border-l-2 border-transparent pl-2">•</span>
+                                                    )}
+                                                </div>
+                                            </React.Fragment>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    /* Inline View Content */
+                                    activeArticle.sentences.map((sentence, idx) => (
+                                        <React.Fragment key={sentence.index}>
+                                            {sentence.isParagraphStart && idx > 0 && <div className="h-6" />} 
+                                            {renderSentence(sentence)}
+                                        </React.Fragment>
+                                    ))
+                                )}
                             </div>
                         )}
                         
                         {isTranslatingArticle && (
-                            <div className="absolute bottom-4 right-4 bg-white shadow-lg border border-indigo-100 px-4 py-2 rounded-full flex items-center gap-2 text-sm text-indigo-600 animate-bounce">
-                                <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
-                                Translating remaining text...
+                            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 text-sm animate-bounce z-50">
+                                <span className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse"></span>
+                                Translating in background...
                             </div>
                         )}
                     </div>
@@ -894,7 +1154,7 @@ function App() {
                 {(topCard || activeTranslation || error) && (
                     <DraggableSheet
                         key={topCard?.word || 'active'}
-                        title={topCard ? "Vocabulary Card" : "Translation"}
+                        title={topCard ? "Vocabulary Card" : (error ? "Error" : "Translation")}
                         initialOffset={{ x: 0, y: 0 }}
                         onClose={() => {
                             setWordCardStack([]);
@@ -904,10 +1164,20 @@ function App() {
                         className="z-50 border-indigo-100 shadow-2xl"
                     >
                         {error && (
-                            <div className="p-6 text-red-600 text-center">{error}</div>
+                            <div className="p-6 text-red-600 text-center flex flex-col items-center gap-4">
+                                <p className="font-bold">{error}</p>
+                                {error.includes('Quota') && (
+                                    <button 
+                                        onClick={() => setIsSettingsOpen(true)}
+                                        className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-bold shadow-lg"
+                                    >
+                                        Configure API Key
+                                    </button>
+                                )}
+                            </div>
                         )}
 
-                        {activeTranslation && (
+                        {activeTranslation && !error && (
                             <div className="p-6 pb-12">
                                 <div className="mb-4">
                                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Original</h3>
@@ -923,7 +1193,7 @@ function App() {
                             </div>
                         )}
 
-                        {topCard && (
+                        {topCard && !error && (
                             <VocabularyCard 
                                 data={topCard} 
                                 onSave={handleSave}
@@ -940,7 +1210,6 @@ function App() {
                                                     translation: newData.translation,
                                                     cardData: newData
                                                 };
-                                                // Sync update to server if enabled
                                                 if(settings.dataSourceMode === 'server' && settings.serverUrl) {
                                                     api.saveItem(settings.serverUrl, updatedItem).catch(console.error);
                                                 }

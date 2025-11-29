@@ -39,6 +39,8 @@ export interface Article {
   sentences: Sentence[];
   createdAt: number;
   lastReadAt: number;
+  groupId?: string; // ID for grouping chapters together
+  groupTitle?: string; // Title of the book/collection
 }
 
 export interface SavedItem {
@@ -68,6 +70,16 @@ export interface HistoryRecord {
   sourceSentenceIndex: number;
 }
 
+export interface ReadingSession {
+  id: string;
+  articleId: string;
+  articleTitle: string;
+  startTime: number;
+  endTime: number;
+  durationSeconds: number;
+  maxProgress: number; // 0-100%
+}
+
 export interface WordUsageData {
   word: string;
   frequency: number;
@@ -81,7 +93,15 @@ export interface WordUsageData {
 export type WordStatsMap = Record<string, WordUsageData>;
 
 export type DataSourceMode = 'ai' | 'local_only' | 'custom_api' | 'server';
-export type Theme = 'light' | 'dark' | 'sepia' | 'forest' | 'amethyst';
+export type Theme = 'light' | 'dark' | 'sepia' | 'forest' | 'amethyst' | 'custom';
+export type LayoutMode = 'inline' | 'split';
+
+export interface CustomThemeColors {
+    appBg: string;
+    text: string;
+    headerBg: string;
+    accent: string;
+}
 
 export interface CustomApiConfig {
   url: string;
@@ -97,14 +117,17 @@ export interface AppSettings {
   geminiBaseUrl?: string; // Optional Base URL for proxying (e.g. https://my-proxy.com)
   dataSourceMode: DataSourceMode; // Preference for fetching data
   
+  // Appearance
+  theme: Theme;
+  customThemeColors?: CustomThemeColors; // User defined colors
+  fontSize: number; // Base font size in px
+  layoutMode: LayoutMode; // 'inline' or 'split'
+  
   // Backend Server Config
   serverUrl?: string; // e.g. "http://localhost:5000"
 
   // Custom API Advanced Config
   customApiConfig?: CustomApiConfig;
-  
-  // Visual Theme
-  theme: Theme;
 }
 
 export interface BackupData {
@@ -115,6 +138,7 @@ export interface BackupData {
   historyRecords: HistoryRecord[];
   wordStats: WordStatsMap;
   settings: AppSettings;
+  sessions?: ReadingSession[]; // Added sessions to backup
 }
 
 export enum ViewMode {

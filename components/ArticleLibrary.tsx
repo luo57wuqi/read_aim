@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Article } from '../types';
-import { BookOpenIcon, PlusIcon, TrashIcon, CheckCircleIcon, PencilIcon } from './Icons';
-import { processTextToArticle } from '../utils/textHelpers';
+import { BookOpenIcon, PlusIcon, TrashIcon, CheckCircleIcon, PencilIcon, GlobeAltIcon, LinkIcon, ArrowLeftIcon, ListBulletIcon } from './Icons';
+import { processTextToArticle, extractContentFromUrl, splitContentIntoChapters } from '../utils/textHelpers';
 
 interface ArticleLibraryProps {
   articles: Article[];
@@ -18,25 +18,99 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
   onDeleteArticle 
 }) => {
   const [isImporting, setIsImporting] = useState(false);
+  const [importType, setImportType] = useState<'text' | 'url'>('text');
+  
   const [importText, setImportText] = useState('');
+  const [importUrl, setImportUrl] = useState('');
   const [importTitle, setImportTitle] = useState('');
+  const [isLoadingUrl, setIsLoadingUrl] = useState(false);
 
-  const handleImport = () => {
-    if (!importText.trim()) return;
+  // Group Navigation State
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
-    const title = importTitle.trim() || importText.split('\n')[0].substring(0, 40) + "...";
-    const sentences = processTextToArticle(importText);
+  // Derive Groups
+  const groupedArticles = useMemo(() => {
+      const groups: Record<string, Article[]> = {};
+      const singles: Article[] = [];
 
-    const newArticle: Article = {
-      id: Date.now().toString(),
-      title,
-      sentences,
-      createdAt: Date.now(),
-      lastReadAt: Date.now()
-    };
+      articles.forEach(article => {
+          if (article.groupId) {
+              if (!groups[article.groupId]) {
+                  groups[article.groupId] = [];
+              }
+              groups[article.groupId].push(article);
+          } else {
+              singles.push(article);
+          }
+      });
 
-    onImportArticle(newArticle);
+      // Sort chapters within groups by createdAt (usually insertion order)
+      Object.keys(groups).forEach(gid => {
+          groups[gid].sort((a, b) => a.createdAt - b.createdAt);
+      });
+
+      return { groups, singles };
+  }, [articles]);
+
+  const handleImport = async () => {
+    let textToProcess = '';
+    let baseTitle = importTitle.trim();
+
+    // 1. Fetch Text
+    if (importType === 'url') {
+        if (!importUrl.trim()) return;
+        setIsLoadingUrl(true);
+        try {
+            textToProcess = await extractContentFromUrl(importUrl);
+            if (!baseTitle) {
+                // Try to infer title from first line
+                baseTitle = textToProcess.split('\n')[0].substring(0, 50).trim() || "Untitled Article";
+            }
+        } catch (e) {
+            alert("Failed to import URL. Please check the link or copy text manually.");
+            setIsLoadingUrl(false);
+            return;
+        } finally {
+            setIsLoadingUrl(false);
+        }
+    } else {
+        textToProcess = importText;
+    }
+
+    if (!textToProcess.trim()) return;
+
+    if (!baseTitle) {
+        baseTitle = textToProcess.split('\n')[0].substring(0, 40) + "...";
+    }
+
+    // 2. Split into Chapters if necessary (approx 2500 words)
+    const chapters = splitContentIntoChapters(textToProcess, 2500);
+    
+    // Generate a Group ID if multiple chapters
+    const newGroupId = chapters.length > 1 ? Date.now().toString() : undefined;
+
+    // 3. Process each chapter
+    chapters.forEach((chapterText, index) => {
+        const sentences = processTextToArticle(chapterText);
+        
+        // If multiple chapters, append Part X
+        const title = chapters.length > 1 ? `Chapter ${index + 1}` : baseTitle;
+
+        const newArticle: Article = {
+            id: Date.now().toString() + Math.random().toString().slice(2,5) + index, // Ensure unique IDs
+            title: title,
+            sentences,
+            createdAt: Date.now() + index, // Ensure slightly different timestamps for sorting
+            lastReadAt: Date.now(),
+            groupId: newGroupId,
+            groupTitle: baseTitle
+        };
+        onImportArticle(newArticle);
+    });
+    
+    // Reset
     setImportText('');
+    setImportUrl('');
     setImportTitle('');
     setIsImporting(false);
   };
@@ -44,126 +118,236 @@ export const ArticleLibrary: React.FC<ArticleLibraryProps> = ({
   const formatDate = (ts: number) => new Date(ts).toLocaleDateString();
 
   return (
-    <div className="flex-1 bg-slate-50 overflow-y-auto p-4 sm:p-8 animate-fade-in">
-      <div className="max-w-4xl mx-auto">
+    <div className="flex-1 bg-slate-50 overflow-y-auto p-4 sm:p-8 animate-fade-in min-h-full">
+      <div className="max-w-6xl mx-auto">
         
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-8 gap-4">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-8 gap-4 border-b border-slate-200 pb-6 sticky top-0 bg-slate-50 z-10 transition-all">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <BookOpenIcon className="w-7 h-7 text-indigo-600" />
-              Article Library
+            <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
+                {activeGroupId ? (
+                    <button onClick={() => setActiveGroupId(null)} className="hover:bg-slate-200 p-2 rounded-full transition-colors mr-1">
+                        <ArrowLeftIcon className="w-6 h-6 text-slate-600" />
+                    </button>
+                ) : (
+                    <BookOpenIcon className="w-8 h-8 text-indigo-600" />
+                )}
+                {activeGroupId ? (
+                    <span className="truncate max-w-md">{groupedArticles.groups[activeGroupId]?.[0]?.groupTitle || 'Collection'}</span>
+                ) : (
+                    'Library'
+                )}
             </h2>
-            <p className="text-slate-500 text-sm">Manage your reading materials and archives.</p>
+            <p className="text-slate-500 mt-1 text-base ml-1">
+                {activeGroupId 
+                    ? `${groupedArticles.groups[activeGroupId]?.length || 0} Chapters in this book.`
+                    : 'Your personal reading collection.'
+                }
+            </p>
           </div>
           
-          <button 
-            onClick={() => setIsImporting(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-sm transition-transform active:scale-95"
-          >
-            <PlusIcon className="w-5 h-5" />
-            Paste / Import Article
-          </button>
+          {!activeGroupId && (
+              <button 
+                onClick={() => setIsImporting(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-transform active:scale-95"
+              >
+                <PlusIcon className="w-5 h-5" />
+                Add Content
+              </button>
+          )}
         </div>
 
-        {/* Import Modal / Form - Expanded for easier input */}
+        {/* Import Modal */}
         {isImporting && (
-          <div className="mb-8 bg-white p-6 rounded-xl shadow-lg border border-indigo-100 animate-slide-in-right relative">
-             <button onClick={() => setIsImporting(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-500">✕</button>
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <PencilIcon className="w-5 h-5 text-indigo-500" />
-                Add New Content
+          <div className="mb-10 bg-white p-8 rounded-2xl shadow-xl border border-indigo-100 animate-slide-in-right relative z-20">
+             <button onClick={() => setIsImporting(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 p-2">✕</button>
+            <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
+                <PencilIcon className="w-6 h-6 text-indigo-500" />
+                Import New Article
             </h3>
-            <div className="space-y-4">
+            
+            <div className="flex gap-2 mb-6 border-b border-slate-100 pb-1">
+                <button 
+                    onClick={() => setImportType('text')}
+                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 ${importType === 'text' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                >
+                    <PencilIcon className="w-4 h-4" /> Text Paste
+                </button>
+                <button 
+                    onClick={() => setImportType('url')}
+                    className={`px-4 py-2 rounded-t-lg text-sm font-bold flex items-center gap-2 transition-colors border-b-2 ${importType === 'url' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                >
+                    <GlobeAltIcon className="w-4 h-4" /> Import from URL
+                </button>
+            </div>
+
+            <div className="space-y-5">
               <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Title (Optional)</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Title / Book Name (Optional)</label>
                   <input
                     type="text"
-                    placeholder="e.g., Chapter 1: The Beginning"
+                    placeholder="e.g., The Great Gatsby"
                     value={importTitle}
                     onChange={(e) => setImportTitle(e.target.value)}
-                    className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
                   />
               </div>
-              <div>
-                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Content</label>
-                  <textarea
-                    placeholder="Paste your English text here..."
-                    value={importText}
-                    onChange={(e) => setImportText(e.target.value)}
-                    className="w-full p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-h-[200px] font-serif text-lg leading-relaxed text-slate-700"
-                  />
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
+
+              {importType === 'text' ? (
+                  <div>
+                       <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Paste Content</label>
+                      <textarea
+                        placeholder="Paste text here... Long articles will be automatically split into multiple chapters and grouped."
+                        value={importText}
+                        onChange={(e) => setImportText(e.target.value)}
+                        className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none min-h-[240px] font-serif text-lg leading-relaxed text-slate-700 resize-y"
+                      />
+                  </div>
+              ) : (
+                  <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Article URL</label>
+                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                          <LinkIcon className="w-5 h-5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="https://..."
+                            value={importUrl}
+                            onChange={(e) => setImportUrl(e.target.value)}
+                            className="w-full bg-transparent outline-none text-sm font-mono text-slate-600"
+                          />
+                      </div>
+                      <div className="flex justify-between items-start mt-2">
+                        <p className="text-[11px] text-slate-400">
+                            Powered by <a href="https://jina.ai/reader" target="_blank" className="underline hover:text-indigo-500">Jina Reader</a>.
+                        </p>
+                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-bold">Auto-Splits & Groups</span>
+                      </div>
+                  </div>
+              )}
+
+              <div className="flex gap-3 justify-end pt-4">
                 <button 
                   onClick={() => setIsImporting(false)}
-                  className="px-5 py-2.5 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition-colors"
+                  className="px-5 py-3 text-slate-500 hover:bg-slate-100 rounded-xl font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleImport}
-                  disabled={!importText.trim()}
-                  className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                  disabled={(importType === 'text' && !importText.trim()) || (importType === 'url' && !importUrl.trim()) || isLoadingUrl}
+                  className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200 flex items-center gap-2 transition-transform active:scale-95"
                 >
-                  Save to Library
+                  {isLoadingUrl && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                  {importType === 'url' ? 'Fetch & Group' : 'Save'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Article Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {articles.length === 0 ? (
-            <div className="col-span-full py-20 text-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50">
-              <BookOpenIcon className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 font-medium text-lg">Your library is empty</p>
-              <p className="text-slate-400 mb-6">Import an article or paste text to start reading.</p>
-              <button 
-                onClick={() => setIsImporting(true)}
-                className="text-indigo-600 font-bold hover:underline"
-              >
-                Start Importing Now
-              </button>
+        {/* Content View */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          
+          {/* Default Empty State */}
+          {articles.length === 0 && (
+            <div className="col-span-full py-24 text-center rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50/50">
+              <div className="bg-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                <BookOpenIcon className="w-10 h-10 text-slate-300" />
+              </div>
+              <p className="text-slate-600 font-bold text-lg mb-1">Your library is empty</p>
+              <p className="text-slate-400 mb-6">Import content to start your reading journey.</p>
             </div>
-          ) : (
-            articles.map(article => (
+          )}
+
+          {/* Render Groups (Folders) if not in a group */}
+          {!activeGroupId && Object.keys(groupedArticles.groups).map(groupId => {
+              const group = groupedArticles.groups[groupId];
+              const coverArticle = group[0];
+              return (
+                <div 
+                    key={groupId}
+                    className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group relative flex flex-col h-[280px] overflow-hidden"
+                    onClick={() => setActiveGroupId(groupId)}
+                >
+                    {/* Folder Stack Effect */}
+                    <div className="absolute top-0 right-0 p-4 z-10">
+                        <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
+                            {group.length} Chapters
+                        </span>
+                    </div>
+                    {/* Visual Stack Layers */}
+                    <div className="absolute top-2 left-2 right-2 h-full bg-slate-100 rounded-t-xl border border-slate-200 -z-10 transform scale-[0.98] -translate-y-2"></div>
+                    <div className="absolute top-4 left-4 right-4 h-full bg-slate-50 rounded-t-xl border border-slate-200 -z-20 transform scale-[0.96] -translate-y-4"></div>
+
+                    <div className="p-6 flex-1 flex flex-col bg-white rounded-2xl relative z-0 h-full">
+                        <div className="flex-1">
+                            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center mb-4 text-indigo-600">
+                                <ListBulletIcon className="w-6 h-6" />
+                            </div>
+                            <h3 className="font-bold text-xl text-slate-800 mb-2 line-clamp-2 font-serif group-hover:text-indigo-600 transition-colors">
+                                {coverArticle.groupTitle || "Untitled Book"}
+                            </h3>
+                            <p className="text-slate-400 text-sm">
+                                Collection
+                            </p>
+                        </div>
+                        <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                            <span className="text-xs text-slate-400">
+                                Last updated: {formatDate(coverArticle.createdAt)}
+                            </span>
+                            <div className="flex -space-x-2">
+                                {/* Decorative Dots */}
+                                <div className="w-2 h-2 rounded-full bg-indigo-200"></div>
+                                <div className="w-2 h-2 rounded-full bg-indigo-300"></div>
+                                <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+              );
+          })}
+
+          {/* Render Articles (Singles or Chapters inside a group) */}
+          {(activeGroupId ? groupedArticles.groups[activeGroupId] : groupedArticles.singles).map(article => (
               <div 
                 key={article.id} 
-                className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group relative flex flex-col justify-between"
+                className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group relative flex flex-col justify-between h-[280px]"
                 onClick={() => onSelectArticle(article.id)}
               >
-                 <div>
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
-                           {article.sentences.length} sentences
+                 <div className="flex-1 overflow-hidden">
+                    <div className="flex justify-between items-start mb-3">
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full uppercase tracking-wide">
+                           {article.sentences.length} Sentences
                         </span>
                         <button 
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if(confirm('Delete this article?')) onDeleteArticle(article.id);
                             }}
-                            className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-red-50 rounded-full"
+                            className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-red-50 rounded-lg"
                         >
                             <TrashIcon className="w-4 h-4" />
                         </button>
                     </div>
-                    <h3 className="font-bold text-lg text-slate-800 mb-2 line-clamp-2 leading-tight group-hover:text-indigo-700 transition-colors">
+                    
+                    <h3 className="font-bold text-xl text-slate-800 mb-3 line-clamp-2 leading-tight group-hover:text-indigo-600 transition-colors font-serif">
                         {article.title}
                     </h3>
-                    <p className="text-slate-500 text-sm line-clamp-3 mb-4 font-serif leading-relaxed">
-                        {article.sentences.slice(0, 3).map(s => s.text).join(' ')}...
-                    </p>
+                    
+                    <div className="relative h-full">
+                         <p className="text-slate-500 text-sm line-clamp-4 leading-relaxed font-serif opacity-80">
+                            {article.sentences.slice(0, 5).map(s => s.text).join(' ')}...
+                        </p>
+                        <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent"></div>
+                    </div>
                  </div>
                  
-                 <div className="flex items-center gap-2 text-xs text-slate-400 pt-3 border-t border-slate-50">
+                 <div className="flex items-center gap-2 text-xs text-slate-400 pt-4 border-t border-slate-50 mt-2">
                     <CheckCircleIcon className="w-3 h-3" />
                     <span>Added {formatDate(article.createdAt)}</span>
                  </div>
               </div>
-            ))
-          )}
+          ))}
         </div>
 
       </div>
