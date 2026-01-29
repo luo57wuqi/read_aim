@@ -1,66 +1,63 @@
 
-import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { WordCardData, AppSettings } from '../types';
-
-const getAIClient = (settings?: AppSettings) => {
-  // Determine API Key
-  let apiKey = process.env.API_KEY; // Default from build process
-  
-  // In Vite local dev, process.env might be polyfilled but empty depending on config.
-  // We prefer settings override first.
-  if (settings?.customApiKey) {
-      apiKey = settings.customApiKey;
-  }
-  
-  if (!apiKey) {
-      throw new Error("An API Key must be set when running in a browser. Please add it in Settings.");
-  }
-
-  // Determine Base URL (Proxy)
-  // If user provided a custom base URL in settings, use it.
-  const clientOptions: any = { apiKey: apiKey };
-  
-  if (settings?.geminiBaseUrl && settings.geminiBaseUrl.trim() !== '') {
-      // The SDK allows baseUrl in constructor options
-      clientOptions.baseUrl = settings.geminiBaseUrl;
-  }
-
-  return new GoogleGenAI(clientOptions);
-};
 
 const getModelName = (settings?: AppSettings) => {
     return settings?.aiModel || 'gemini-2.5-flash';
 };
 
-// Schema for the detailed word card
-const wordCardSchema: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    word: { type: Type.STRING, description: "The word being analyzed" },
-    phonetic: { type: Type.STRING, description: "IPA phonetic transcription" },
-    translation: { type: Type.STRING, description: "Common Chinese translation (e.g. n. 天堂)" },
-    recorded_meanings: { type: Type.STRING, description: "Corresponds to '有记录意思': List of standard dictionary definitions in Chinese (vt... vi...)" },
-    mnemonic_analysis: { type: Type.STRING, description: "Corresponds to '有意思发现[用起来]': The core mnemonic breakdown using sound/shape/root analysis in Chinese." },
-    core_logic: { type: Type.STRING, description: "Corresponds to '核心含义内核': The single underlying concept (e.g. '让高度升高')." },
-    visual_image_prompt: { type: Type.STRING, description: "Corresponds to '图': Description for a sketch/image." },
-    scenario_sentence_en: { type: Type.STRING, description: "Example sentence." },
-    scenario_sentence_cn: { type: Type.STRING, description: "Chinese translation of example." },
-    related_word_suggestion: {
-      type: Type.OBJECT,
-      properties: {
-        word: { type: Type.STRING, description: "A related word used in the analysis" },
-        reason: { type: Type.STRING, description: "Connection reason in Chinese" }
-      },
-      required: ["word", "reason"],
-    }
-  },
-  required: ["word", "phonetic", "translation", "recorded_meanings", "mnemonic_analysis", "core_logic", "visual_image_prompt", "scenario_sentence_en", "scenario_sentence_cn"],
+// --- Low-level REST call helper (avoid bundling @google/genai to fix Vite parse issues) ---
+const callGemini = async (prompt: string, settings: AppSettings | undefined, extraConfig?: Record<string, any>): Promise<string> => {
+  // Determine API Key
+  // Prefer settings.customApiKey; fallback to Vite env VITE_API_KEY
+  let apiKey: string | undefined = settings?.customApiKey;
+  if (!apiKey) {
+      const envAny: any = import.meta.env || {};
+      apiKey = envAny.VITE_API_KEY;
+  }
+  if (!apiKey) {
+      throw new Error("An API Key must be set. Please configure it in Settings or VITE_API_KEY env.");
+  }
+
+  const model = getModelName(settings);
+  const baseUrl = (settings?.geminiBaseUrl && settings.geminiBaseUrl.trim() !== '')
+      ? settings.geminiBaseUrl!.replace(/\/+$/, '')
+      : 'https://generativelanguage.googleapis.com';
+
+  const url = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const body = {
+      contents: [
+          {
+              role: 'user',
+              parts: [{ text: prompt }]
+          }
+      ],
+      generationConfig: {
+          temperature: 0.6,
+          ...(extraConfig || {}),
+      }
+  };
+
+  const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Gemini HTTP ${res.status}: ${text}`);
+  }
+
+  const data: any = await res.json();
+  const textPart = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textPart || typeof textPart !== 'string') {
+      throw new Error("Gemini response missing text content");
+  }
+  return textPart;
 };
 
 export const generateWordCard = async (word: string, contextSentence?: string, settings?: AppSettings): Promise<WordCardData> => {
-  const ai = getAIClient(settings);
-  const model = getModelName(settings);
-  
   const prompt = `
     Analyze the English word: "${word}".
     ${contextSentence ? `Context: "${contextSentence}".` : ''}
@@ -104,46 +101,29 @@ export const generateWordCard = async (word: string, contextSentence?: string, s
     Target Word: "${word}"
   `;
 
-  const response = await ai.models.generateContent({
-    model: model,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: wordCardSchema,
-      temperature: 0.6,
-    },
-  });
-
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-  
-  return JSON.parse(text) as WordCardData;
+  const raw = await callGemini(
+      prompt + '\n\nReturn ONLY valid JSON object for WordCardData, no extra text or explanation.',
+      settings,
+  );
+  // 清洗出 JSON
+  const clean = raw.replace(/```json\n?|\n?```/g, '');
+  const match = clean.match(/\{[\s\S]*\}/);
+  const jsonStr = match ? match[0] : clean;
+  return JSON.parse(jsonStr) as WordCardData;
 };
 
 export const translateText = async (text: string, settings?: AppSettings): Promise<string> => {
-  const ai = getAIClient(settings);
-  const model = getModelName(settings);
-  
   const prompt = `Translate the following English text to Chinese (Simplified). 
   Keep the tone natural and accurate to the context.
   
   Text: "${text}"`;
 
-  const response = await ai.models.generateContent({
-    model: model,
-    contents: prompt,
-    config: {
-        temperature: 0.3,
-    }
-  });
-
-  return response.text || "Translation failed.";
+  const result = await callGemini(prompt, settings, { temperature: 0.3 });
+  return result.trim();
 };
 
 export const translateBatch = async (texts: string[], settings?: AppSettings): Promise<string[]> => {
   if (texts.length === 0) return [];
-  const ai = getAIClient(settings);
-  const model = getModelName(settings);
 
   const prompt = `Translate the following array of English sentences/paragraphs into Chinese (Simplified). 
   Return a JSON object with a property 'translations' which is an array of strings, 
@@ -153,25 +133,14 @@ export const translateBatch = async (texts: string[], settings?: AppSettings): P
   ${JSON.stringify(texts)}
   `;
 
-  const schema: Schema = {
-      type: Type.OBJECT,
-      properties: {
-          translations: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-          }
-      }
-  };
-
-  const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-      config: {
-          responseMimeType: "application/json",
-          responseSchema: schema
-      }
-  });
-
-  const result = JSON.parse(response.text || "{}");
-  return result.translations || [];
+  const raw = await callGemini(
+      prompt + '\n\nYou MUST return ONLY JSON like: {"translations": [...]} with no extra text.',
+      settings,
+      { temperature: 0.3 },
+  );
+  let clean = raw.replace(/```json\n?|\n?```/g, '');
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (match) clean = match[0];
+  const result = JSON.parse(clean || "{}");
+  return Array.isArray(result.translations) ? result.translations : [];
 }
