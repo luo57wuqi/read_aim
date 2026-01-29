@@ -16,6 +16,7 @@ interface SettingsViewProps {
   };
   onImportData: (data: BackupData) => void;
   onMergeVocabulary: (items: SavedItem[]) => void;
+  onFeishuSyncNow?: () => void;
 }
 
 const REQUIRED_JSON_FIELDS = [
@@ -69,7 +70,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     onSaveSettings,
     data,
     onImportData,
-    onMergeVocabulary
+    onMergeVocabulary,
+    onFeishuSyncNow
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [activeTab, setActiveTab] = useState<'general' | 'advanced' | 'server'>('general');
@@ -154,6 +156,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const url = localSettings.serverUrl || 'http://localhost:5000';
       const isOk = await api.checkStatus(url);
       setServerStatus(isOk ? 'ok' : 'error');
+  };
+
+  const handleOpenFeishuApiExplorer = () => {
+      window.open('https://open.feishu.cn/api-explorer/cli_a79c07723af8d013?apiName=update&from=op_doc_tab&project=bitable&resource=app.table.record&version=v1', '_blank');
   };
 
   // --- Export Logic ---
@@ -485,6 +491,151 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 
                 {activeTab === 'server' && (
                     <div className="space-y-6">
+                         <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-sm font-bold text-emerald-800">飞书云盘同步 (Feishu Drive via Pages Functions)</h3>
+                                <ClockIcon className="w-4 h-4 text-emerald-600" />
+                            </div>
+                            <p className="text-xs text-emerald-700 mb-3 leading-relaxed">
+                                Use Cloudflare Pages Functions as a secure proxy to sync your state JSON to a Feishu Drive folder.
+                                <br />
+                                <strong>Recommended:</strong> enable periodic save + save-on-exit.
+                            </p>
+                        </div>
+
+                        {/* Feishu Config */}
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Feishu Folder Token</label>
+                                <input
+                                    type="text"
+                                    value={localSettings.feishuFolderToken || ''}
+                                    onChange={(e) => setLocalSettings(p => ({ ...p, feishuFolderToken: e.target.value }))}
+                                    placeholder="e.g. HCeBfQsBKl9IF9dkZWvcqxIWnKh"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    Copy from folder URL: <code>https://my.feishu.cn/drive/folder/&lt;folder_token&gt;</code>
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">State JSON File Name</label>
+                                <input
+                                    type="text"
+                                    value={localSettings.feishuFileName || 'reader-state.json'}
+                                    onChange={(e) => setLocalSettings(p => ({ ...p, feishuFileName: e.target.value }))}
+                                    placeholder="reader-state.json"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Feishu OAuth Helper */}
+                        <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                            <div className="text-xs font-bold text-slate-600 mb-1">Feishu OAuth Helper（打开飞书网页手动拿 user_access_token）</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">Feishu App ID</label>
+                                    <input
+                                        type="text"
+                                        value={localSettings.feishuAppId || ''}
+                                        onChange={(e) => setLocalSettings(p => ({ ...p, feishuAppId: e.target.value }))}
+                                        placeholder="cli_xxxxxx"
+                                        className="w-full p-2 border border-slate-300 rounded font-mono text-xs"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">Feishu App Secret</label>
+                                    <input
+                                        type="password"
+                                        value={localSettings.feishuAppSecret || ''}
+                                        onChange={(e) => setLocalSettings(p => ({ ...p, feishuAppSecret: e.target.value }))}
+                                        placeholder="********"
+                                        className="w-full p-2 border border-slate-300 rounded font-mono text-xs"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-[11px] text-slate-500 mb-1">Redirect URI</label>
+                                <input
+                                    type="text"
+                                    value={localSettings.feishuRedirectUri || window.location.origin}
+                                    onChange={(e) => setLocalSettings(p => ({ ...p, feishuRedirectUri: e.target.value }))}
+                                    placeholder="例如：https://your-domain.com"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-xs"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    必须与飞书开发者后台“重定向 URL”配置一致。授权成功后会带 <code>?code=xxx</code> 回到这个地址。
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                                <div className="text-[11px] text-slate-500">
+                                    建议步骤：<br />
+                                    1. 点击右侧按钮打开飞书 <span className="font-mono">API 调试台</span>。<br />
+                                    2. 选择你的应用并完成一次授权调用。<br />
+                                    3. 在请求详情里找到 <span className="font-mono">Authorization: Bearer ...</span>，把后面的 access_token 粘到下方输入框。
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleOpenFeishuApiExplorer}
+                                        className="flex-1 py-2 px-3 bg-white border border-emerald-300 rounded text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
+                                    >
+                                        打开飞书 API 调试台
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-[11px] text-slate-500 mb-1">user_access_token（用于 Feishu 同步）</label>
+                                <textarea
+                                    value={localSettings.feishuUserAccessToken || ''}
+                                    onChange={(e) => setLocalSettings(p => ({ ...p, feishuUserAccessToken: e.target.value }))}
+                                    placeholder="成功换取后会自动填入，你也可以粘贴已有的 user_access_token"
+                                    className="w-full p-2 border border-slate-300 rounded font-mono text-[11px] h-20"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Enable Feishu Mode Toggle */}
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-emerald-200 rounded-lg bg-emerald-50/50">
+                            <div>
+                                <span className="block font-bold text-slate-700 text-sm">启用飞书服务器 (Enable Feishu Storage)</span>
+                                <span className="text-xs text-slate-500">Sync full app state JSON to Feishu Drive via <code>/api/feishu/state</code>.</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {onFeishuSyncNow && localSettings.useFeishuStorage && (
+                                    <button
+                                        type="button"
+                                        onClick={onFeishuSyncNow}
+                                        className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-full hover:bg-emerald-700"
+                                    >
+                                        立即同步飞书
+                                    </button>
+                                )}
+                                <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                    <input
+                                        type="checkbox"
+                                        name="toggle"
+                                        id="feishu-toggle"
+                                        checked={Boolean(localSettings.useFeishuStorage)}
+                                        onChange={(e) => setLocalSettings(p => ({
+                                            ...p,
+                                            useFeishuStorage: e.target.checked,
+                                            // Feishu and Python server are mutually exclusive
+                                            useServerStorage: e.target.checked ? false : p.useServerStorage
+                                        }))}
+                                        className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 ease-in-out checked:right-0 right-5 checked:border-emerald-600"
+                                        style={{ right: localSettings.useFeishuStorage ? '0' : 'auto', left: localSettings.useFeishuStorage ? 'auto' : '0' }}
+                                    />
+                                    <label
+                                        htmlFor="feishu-toggle"
+                                        className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors duration-300 ${localSettings.useFeishuStorage ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                                    ></label>
+                                </div>
+                            </div>
+                        </div>
+
                          <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                             <div className="flex justify-between items-center mb-2">
                                 <h3 className="text-sm font-bold text-blue-800">自托管 Python 后端 (Self-Hosted Backend)</h3>
@@ -534,7 +685,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                     checked={localSettings.useServerStorage}
                                     onChange={(e) => setLocalSettings(p => ({
                                         ...p, 
-                                        useServerStorage: e.target.checked
+                                        useServerStorage: e.target.checked,
+                                        // Feishu and Python server are mutually exclusive
+                                        useFeishuStorage: e.target.checked ? false : p.useFeishuStorage
                                     }))}
                                     className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 ease-in-out checked:right-0 right-5 checked:border-indigo-600"
                                     style={{ right: localSettings.useServerStorage ? '0' : 'auto', left: localSettings.useServerStorage ? 'auto' : '0' }}

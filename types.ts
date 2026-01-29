@@ -118,6 +118,7 @@ export interface AppSettings {
   
   dataSourceMode: DataSourceMode; // Controls AI Source (Gemini vs Custom vs Local)
   useServerStorage: boolean; // Controls Storage Source (Local vs Python Backend)
+  useFeishuStorage?: boolean; // Controls Storage Source (Local vs Feishu via Pages Functions)
   
   // Appearance
   theme: Theme;
@@ -128,6 +129,14 @@ export interface AppSettings {
   
   // Backend Server Config
   serverUrl?: string; // e.g. "http://localhost:5000"
+
+  // Feishu Cloud Drive Sync Config (via Cloudflare Pages Functions)
+  feishuFolderToken?: string;
+  feishuFileName?: string; // e.g. "reader-state.json"
+  feishuAppId?: string; // OAuth helper: App ID
+  feishuAppSecret?: string; // OAuth helper: App Secret
+  feishuRedirectUri?: string; // OAuth helper: redirect URI
+  feishuUserAccessToken?: string; // OAuth helper: resulting user_access_token
 
   // Custom API Advanced Config
   customApiConfig?: CustomApiConfig;

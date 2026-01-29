@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { translateText, generateWordCard, translateBatch } from './services/geminiService';
 import { fetchFromCustomApi, translateWithCustomApi, translateBatchWithCustomApi } from './services/customApiService';
 import { api } from './services/backendService';
+import { feishuStorageApi } from './services/feishuStorageService';
 import { SavedItem, WordCardData, ViewMode, HistoryRecord, Article, WordStatsMap, WordUsageData, Sentence, AppSettings, BackupData, ReadingSession } from './types';
 import { Sidebar } from './components/Sidebar';
 import { LeftSidebar } from './components/LeftSidebar';
@@ -21,8 +22,11 @@ const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-2.5-flash',
     dataSourceMode: 'ai',
     useServerStorage: false,
+    useFeishuStorage: false,
     theme: 'light',
     serverUrl: 'http://localhost:5000',
+    feishuFolderToken: '',
+    feishuFileName: 'reader-state.json',
     fontSize: 18,
     lineHeight: 1.6,
     layoutMode: 'inline',
@@ -126,6 +130,67 @@ function App() {
         const statsLocal = JSON.parse(localStorage.getItem('english_reader_word_stats') || '{}');
         const sessionsLocal = JSON.parse(localStorage.getItem('english_reader_sessions') || '[]');
 
+        // Feishu Mode (via Pages Functions)
+        if (settings.useFeishuStorage) {
+            const folderToken = settings.feishuFolderToken || '';
+            const fileName = settings.feishuFileName || 'reader-state.json';
+            if (!folderToken) {
+                setToast("Feishu enabled but folder token is empty. Using local data.");
+                setArticles(articlesLocal);
+                setSavedItems(savedItemsLocal);
+                setHistoryRecords(historyLocal);
+                setWordStats(statsLocal);
+                setReadingSessions(sessionsLocal);
+                if (articlesLocal.length === 0) createDefaultArticle();
+                return;
+            }
+
+            try {
+                const remote = await feishuStorageApi.pullState(folderToken, fileName);
+                if (remote) {
+                    setArticles(remote.articles || []);
+                    setSavedItems(remote.savedItems || []);
+                    setHistoryRecords(remote.historyRecords || []);
+                    setWordStats(remote.wordStats || {});
+                    setReadingSessions(remote.sessions || []);
+
+                    // Keep Feishu mode enabled locally even if remote settings differ
+                    setSettings(prev => ({
+                        ...DEFAULT_SETTINGS,
+                        ...(remote.settings || {}),
+                        useFeishuStorage: true,
+                        useServerStorage: false,
+                        feishuFolderToken: prev.feishuFolderToken || folderToken,
+                        feishuFileName: prev.feishuFileName || fileName,
+                    }));
+
+                    if ((remote.articles || []).length > 0 && !activeArticleId) {
+                        setActiveArticleId(remote.articles[0].id);
+                    } else if ((remote.articles || []).length === 0) {
+                        if (articlesLocal.length === 0) createDefaultArticle();
+                    }
+                } else {
+                    // Remote file missing or not readable yet, fallback to local
+                    setArticles(articlesLocal);
+                    setSavedItems(savedItemsLocal);
+                    setHistoryRecords(historyLocal);
+                    setWordStats(statsLocal);
+                    setReadingSessions(sessionsLocal);
+                    if (articlesLocal.length === 0) createDefaultArticle();
+                }
+            } catch (err) {
+                console.error("Feishu pull failed", err);
+                setToast("Feishu sync failed. Using local data.");
+                setArticles(articlesLocal);
+                setSavedItems(savedItemsLocal);
+                setHistoryRecords(historyLocal);
+                setWordStats(statsLocal);
+                setReadingSessions(sessionsLocal);
+                if (articlesLocal.length === 0) createDefaultArticle();
+            }
+            return;
+        }
+
         // Only attempt server fetch if useServerStorage is TRUE
         if (settings.useServerStorage && settings.serverUrl) {
             try {
@@ -176,7 +241,74 @@ function App() {
         }
     };
     loadData();
-  }, [settings.useServerStorage, settings.serverUrl]); 
+  }, [settings.useServerStorage, settings.serverUrl, settings.useFeishuStorage, settings.feishuFolderToken, settings.feishuFileName]); 
+
+  // Feishu Sync: periodic save + best-effort save on exit
+  useEffect(() => {
+      if (!settings.useFeishuStorage) return;
+      if (!settings.feishuFolderToken) return;
+      const fileName = settings.feishuFileName || 'reader-state.json';
+
+      let cancelled = false;
+
+      const buildBackup = (): BackupData => ({
+          version: 1,
+          timestamp: Date.now(),
+          articles,
+          savedItems,
+          historyRecords,
+          wordStats,
+          settings,
+          sessions: readingSessions,
+      });
+
+      const push = async () => {
+          try {
+              await feishuStorageApi.pushState(settings.feishuFolderToken!, fileName, buildBackup());
+          } catch (e) {
+              console.warn("Feishu periodic push failed", e);
+          }
+      };
+
+      const interval = setInterval(() => {
+          if (cancelled) return;
+          push();
+      }, 60_000);
+
+      const handleVisibility = () => {
+          if (document.visibilityState === 'hidden') {
+              // Try a quick push when tab is backgrounded
+              push();
+          }
+      };
+
+      const handleBeforeUnload = () => {
+          // Best effort only; request may not finish.
+          // keepalive: true is set in feishuStorageApi.
+          push();
+      };
+
+      document.addEventListener('visibilitychange', handleVisibility);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      return () => {
+          cancelled = true;
+          clearInterval(interval);
+          document.removeEventListener('visibilitychange', handleVisibility);
+          window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+  }, [
+      settings.useFeishuStorage,
+      settings.feishuFolderToken,
+      settings.feishuFileName,
+      // Data dependencies
+      articles,
+      savedItems,
+      historyRecords,
+      wordStats,
+      readingSessions,
+      settings,
+  ]);
 
   // Persist State (Local backup always happens)
   useEffect(() => {
@@ -1388,6 +1520,34 @@ function App() {
             data={{ articles, savedItems, historyRecords, wordStats }}
             onImportData={handleImportData}
             onMergeVocabulary={handleMergeVocabulary}
+            onFeishuSyncNow={async () => {
+                if (!settings.useFeishuStorage) {
+                    setToast("请先启用飞书服务器开关");
+                    return;
+                }
+                if (!settings.feishuFolderToken) {
+                    setToast("Feishu Folder Token 为空");
+                    return;
+                }
+                const fileName = settings.feishuFileName || 'reader-state.json';
+                try {
+                    const backup: BackupData = {
+                        version: 1,
+                        timestamp: Date.now(),
+                        articles,
+                        savedItems,
+                        historyRecords,
+                        wordStats,
+                        settings,
+                        sessions: readingSessions,
+                    };
+                    await feishuStorageApi.pushState(settings.feishuFolderToken, fileName, backup);
+                    setToast("已手动同步到飞书 JSON 文件");
+                } catch (e: any) {
+                    console.error("Manual Feishu sync failed", e);
+                    setToast("同步飞书失败，请检查 user_access_token 和 Cloudflare Function");
+                }
+            }}
           />
       )}
 
