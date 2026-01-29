@@ -134,8 +134,14 @@ function App() {
         if (settings.useFeishuStorage) {
             const folderToken = settings.feishuFolderToken || '';
             const fileName = settings.feishuFileName || 'reader-state.json';
-            if (!folderToken) {
-                setToast("Feishu enabled but folder token is empty. Using local data.");
+            const userToken = settings.feishuUserAccessToken || '';
+
+            if (!folderToken || !userToken) {
+                setToast(
+                    !folderToken
+                        ? "Feishu enabled but folder token is empty. Using local data."
+                        : "Feishu enabled but user_access_token is empty. Using local data."
+                );
                 setArticles(articlesLocal);
                 setSavedItems(savedItemsLocal);
                 setHistoryRecords(historyLocal);
@@ -146,7 +152,7 @@ function App() {
             }
 
             try {
-                const remote = await feishuStorageApi.pullState(folderToken, fileName);
+                const remote = await feishuStorageApi.pullState(folderToken, fileName, userToken);
                 if (remote) {
                     setArticles(remote.articles || []);
                     setSavedItems(remote.savedItems || []);
@@ -247,6 +253,7 @@ function App() {
   useEffect(() => {
       if (!settings.useFeishuStorage) return;
       if (!settings.feishuFolderToken) return;
+      if (!settings.feishuUserAccessToken) return;
       const fileName = settings.feishuFileName || 'reader-state.json';
 
       let cancelled = false;
@@ -264,7 +271,12 @@ function App() {
 
       const push = async () => {
           try {
-              await feishuStorageApi.pushState(settings.feishuFolderToken!, fileName, buildBackup());
+              await feishuStorageApi.pushState(
+                  settings.feishuFolderToken!,
+                  fileName,
+                  buildBackup(),
+                  settings.feishuUserAccessToken
+              );
           } catch (e) {
               console.warn("Feishu periodic push failed", e);
           }
@@ -1529,6 +1541,10 @@ function App() {
                     setToast("Feishu Folder Token 为空");
                     return;
                 }
+                if (!settings.feishuUserAccessToken) {
+                    setToast("user_access_token 为空，请先在设置中粘贴从飞书获取的 token");
+                    return;
+                }
                 const fileName = settings.feishuFileName || 'reader-state.json';
                 try {
                     const backup: BackupData = {
@@ -1541,7 +1557,12 @@ function App() {
                         settings,
                         sessions: readingSessions,
                     };
-                    await feishuStorageApi.pushState(settings.feishuFolderToken, fileName, backup);
+                    await feishuStorageApi.pushState(
+                        settings.feishuFolderToken,
+                        fileName,
+                        backup,
+                        settings.feishuUserAccessToken
+                    );
                     setToast("已手动同步到飞书 JSON 文件");
                 } catch (e: any) {
                     console.error("Manual Feishu sync failed", e);

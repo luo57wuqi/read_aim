@@ -1,37 +1,23 @@
 /**
  * Cloudflare Pages Function: Feishu Drive JSON state sync.
  *
- * Endpoints:
+ * Endpoints (same-origin from frontend):
  * - GET  /api/feishu/state?folder_token=...&file_name=reader-state.json
  * - POST /api/feishu/state?folder_token=...&file_name=reader-state.json   (body: BackupData JSON)
  *
- * Auth strategy (MVP):
- * - Uses tenant_access_token (internal app) from FEISHU_APP_ID / FEISHU_APP_SECRET.
+ * Auth strategy (Plan B):
+ * - Frontend passes Feishu `user_access_token` via Authorization header:
+ *   Authorization: Bearer <user_access_token>
  *
- * IMPORTANT:
- * - If your target folder is in a user's personal drive, tenant token may NOT have access.
- *   In that case, upgrade this function to OAuth user_access_token.
+ * NOTE:
+ * - This implementation uses Feishu Drive v1 APIs (list/download/upload/delete).
+ * - If Feishu updates the Drive API, adjust the endpoint paths below according to docs.
  */
-export interface Env {
-  FEISHU_APP_ID: string;
-  FEISHU_APP_SECRET: string;
-}
+export interface Env {}
 
-type FeishuTokenResp = { code: number; msg: string; tenant_access_token?: string; expire?: number };
+type FeishuCommonResp<T> = { code: number; msg: string; data: T };
 
-async function getTenantAccessToken(env: Env): Promise<string> {
-  const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ app_id: env.FEISHU_APP_ID, app_secret: env.FEISHU_APP_SECRET }),
-  });
-  if (!res.ok) throw new Error(`Failed to get tenant_access_token: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as FeishuTokenResp;
-  if (data.code !== 0 || !data.tenant_access_token) {
-    throw new Error(`Failed to get tenant_access_token: ${data.code} ${data.msg}`);
-  }
-  return data.tenant_access_token;
-}
+const FEISHU_BASE = 'https://open.feishu.cn';
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -41,6 +27,94 @@ function json(data: unknown, status = 200) {
       'Cache-Control': 'no-store',
     },
   });
+}
+
+async function listFolderFiles(accessToken: string, folderToken: string): Promise<any[]> {
+  const res = await fetch(
+    `${FEISHU_BASE}/open-apis/drive/v1/files?folder_token=${encodeURIComponent(folderToken)}&page_size=200`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Feishu list files failed: ${res.status} ${res.statusText}`);
+  }
+
+  const body = (await res.json()) as FeishuCommonResp<{ files?: any[] }>;
+  if (body.code !== 0) {
+    throw new Error(`Feishu list files error: ${body.code} ${body.msg}`);
+  }
+
+  return body.data?.files || [];
+}
+
+async function downloadFileContent(accessToken: string, fileToken: string): Promise<string> {
+  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/${fileToken}/download`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Feishu download failed: ${res.status} ${res.statusText}`);
+  }
+
+  return await res.text();
+}
+
+async function deleteFile(accessToken: string, fileToken: string): Promise<void> {
+  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/${fileToken}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  // Best-effort delete: log but don't throw to avoid blocking writes.
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    console.warn('Feishu delete failed', res.status, res.statusText, text);
+  }
+}
+
+async function uploadJsonFile(
+  accessToken: string,
+  folderToken: string,
+  fileName: string,
+  content: string,
+): Promise<any> {
+  const form = new FormData();
+  form.set('file_name', fileName);
+  form.set('parent_type', 'explorer');
+  form.set('parent_token', folderToken);
+
+  const blob = new Blob([content], { type: 'application/json; charset=utf-8' });
+  // Field name "file" is commonly used by Feishu Drive upload_all API; adjust if docs differ.
+  form.set('file', blob, fileName);
+
+  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Feishu upload failed: ${res.status} ${res.statusText}`);
+  }
+
+  const body = (await res.json()) as FeishuCommonResp<{ file?: any }>;
+  if (body.code !== 0) {
+    throw new Error(`Feishu upload error: ${body.code} ${body.msg}`);
+  }
+
+  return body.data?.file;
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -53,53 +127,63 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ ok: false, error: 'Missing folder_token' }, 400);
     }
 
-    const tenantToken = await getTenantAccessToken(context.env);
-
-    // NOTE:
-    // The exact Drive v1 endpoints for:
-    // - listing a folder's children
-    // - downloading a file's content
-    // - uploading a new file into a folder
-    // - deleting a file
-    // depend on Feishu OpenAPI "drive/v1" specs.
-    //
-    // This MVP returns a clear error if the integration isn't fully configured yet.
-    // Once you confirm the exact API endpoints your tenant has access to, replace the TODOs.
+    const authHeader = context.request.headers.get('Authorization') || '';
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      return json(
+        {
+          ok: false,
+          error: 'Missing or invalid Authorization header. Expect "Authorization: Bearer <user_access_token>".',
+        },
+        401,
+      );
+    }
+    const userAccessToken = match[1].trim();
 
     if (context.request.method === 'GET') {
-      return json({
-        ok: false,
-        error:
-          'Feishu Drive API endpoints not finalized in code yet. Please confirm Drive v1 list/download/upload/delete endpoints OR switch to user_access_token OAuth if this is personal drive.',
-        hint: {
-          folder_token: folderToken,
-          file_name: fileName,
-          auth: 'tenant_access_token',
-          token_present: Boolean(tenantToken),
-        },
-      });
+      const files = await listFolderFiles(userAccessToken, folderToken);
+      const existing = files.find((f: any) => f.name === fileName);
+
+      if (!existing) {
+        // Frontend will treat { ok:false } as "no remote file yet" and fall back to local.
+        return json({ ok: false, error: 'FILE_NOT_FOUND' }, 404);
+      }
+
+      const fileToken = (existing.token || existing.file_token) as string | undefined;
+      if (!fileToken) {
+        return json({ ok: false, error: 'Existing file has no token field' }, 500);
+      }
+
+      const raw = await downloadFileContent(userAccessToken, fileToken);
+      try {
+        const parsed = JSON.parse(raw);
+        return json(parsed, 200);
+      } catch {
+        return json({ ok: false, error: 'FILE_PARSE_ERROR', raw }, 500);
+      }
     }
 
     if (context.request.method === 'POST') {
-      // Validate JSON body early (so client gets useful error)
       const bodyText = await context.request.text();
+      let parsed: unknown;
       try {
-        JSON.parse(bodyText);
+        parsed = JSON.parse(bodyText);
       } catch {
         return json({ ok: false, error: 'Body must be valid JSON' }, 400);
       }
 
-      return json({
-        ok: false,
-        error:
-          'Feishu Drive API endpoints not finalized in code yet. This endpoint is a stub. Next step: implement upload + delete-old strategy using Drive v1.',
-        hint: {
-          folder_token: folderToken,
-          file_name: fileName,
-          auth: 'tenant_access_token',
-          token_present: Boolean(tenantToken),
-        },
-      });
+      const files = await listFolderFiles(userAccessToken, folderToken);
+      const existing = files.find((f: any) => f.name === fileName);
+
+      if (existing) {
+        const fileToken = (existing.token || existing.file_token) as string | undefined;
+        if (fileToken) {
+          await deleteFile(userAccessToken, fileToken);
+        }
+      }
+
+      await uploadJsonFile(userAccessToken, folderToken, fileName, JSON.stringify(parsed));
+      return json({ ok: true }, 200);
     }
 
     return json({ ok: false, error: 'Method not allowed' }, 405);
@@ -107,5 +191,3 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return json({ ok: false, error: e?.message || String(e) }, 500);
   }
 };
-
-
