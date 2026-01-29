@@ -159,7 +159,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleOpenFeishuApiExplorer = () => {
-      window.open('https://open.feishu.cn/api-explorer/cli_a79c07723af8d013?apiName=update&from=op_doc_tab&project=bitable&resource=app.table.record&version=v1', '_blank');
+      // Open Feishu API Explorer in a generic way; you可以在页面内选择具体接口和应用
+      window.open('https://open.feishu.cn/api-explorer?from=guide', '_blank');
   };
 
   // --- Export Logic ---
