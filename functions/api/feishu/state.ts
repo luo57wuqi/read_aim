@@ -72,7 +72,7 @@ async function downloadFileContent(accessToken: string, fileToken: string): Prom
   return await res.text();
 }
 
-async function deleteFile(accessToken: string, fileToken: string): Promise<void> {
+async function deleteFile(accessToken: string, fileToken: string): Promise<boolean> {
   // According to Feishu API docs, delete requires type query parameter
   const res = await fetch(
     `${FEISHU_BASE}/open-apis/drive/v1/files/${fileToken}?type=file`,
@@ -85,20 +85,23 @@ async function deleteFile(accessToken: string, fileToken: string): Promise<void>
     },
   );
 
-  // Best-effort delete: log but don't throw to avoid blocking writes.
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     console.warn('Feishu delete failed', res.status, res.statusText, text);
-  } else {
-    // Check response body for error code
-    try {
-      const body = await res.json();
-      if (body.code !== 0) {
-        console.warn('Feishu delete API error', body.code, body.msg);
-      }
-    } catch {
-      // Response is not JSON, which is fine for DELETE
+    return false;
+  }
+
+  // Check response body for error code
+  try {
+    const body = await res.json();
+    if (body.code !== 0) {
+      console.warn('Feishu delete API error', body.code, body.msg);
+      return false;
     }
+    return true;
+  } catch {
+    // Response is not JSON, but HTTP status is OK, assume success
+    return true;
   }
 }
 
@@ -224,17 +227,47 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       try {
+        // Step 1: List files and find existing file with same name
         const files = await listFolderFiles(userAccessToken, folderToken);
         const existing = files.find((f: any) => f.name === fileName);
 
         if (existing) {
           const fileToken = (existing.token || existing.file_token) as string | undefined;
           if (fileToken) {
-            await deleteFile(userAccessToken, fileToken);
+            // Try to delete existing file
+            const deleted = await deleteFile(userAccessToken, fileToken);
+            if (!deleted) {
+              console.warn(`Failed to delete existing file ${fileName}, will continue upload`);
+            }
           }
         }
 
+        // Step 2: Upload new file
         await uploadJsonFile(userAccessToken, folderToken, fileName, JSON.stringify(parsed));
+
+        // Step 3: After upload, check for duplicate files and clean up
+        // (in case delete failed or upload created a duplicate)
+        const filesAfterUpload = await listFolderFiles(userAccessToken, folderToken);
+        const duplicates = filesAfterUpload.filter((f: any) => f.name === fileName);
+        
+        if (duplicates.length > 1) {
+          // Keep the newest file (last in list or highest token), delete others
+          // Sort by token or keep last one
+          const sortedDuplicates = duplicates.sort((a: any, b: any) => {
+            const tokenA = (a.token || a.file_token || '').toString();
+            const tokenB = (b.token || b.file_token || '').toString();
+            return tokenB.localeCompare(tokenA); // Keep the "newest" (highest token)
+          });
+          
+          // Delete all except the first (newest) one
+          for (let i = 1; i < sortedDuplicates.length; i++) {
+            const dupToken = sortedDuplicates[i].token || sortedDuplicates[i].file_token;
+            if (dupToken) {
+              await deleteFile(userAccessToken, dupToken);
+            }
+          }
+        }
+
         return json({ ok: true }, 200);
       } catch (uploadError: any) {
         // Return detailed error for debugging
