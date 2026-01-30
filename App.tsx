@@ -329,19 +329,21 @@ function App() {
   ]);
 
   // Sync when active article changes (file open/close)
+  // Use a separate ref to track article changes for sync purposes
+  const syncArticleIdRef = useRef<string | null>(null);
   useEffect(() => {
       if (!settings.useFeishuStorage) return;
       if (!settings.feishuFolderToken) return;
       if (!settings.feishuUserAccessToken) return;
       
-      // Skip initial load (when previousArticleIdRef is null and activeArticleId is set for first time)
-      if (previousArticleIdRef.current === null && activeArticleId !== null) {
-          previousArticleIdRef.current = activeArticleId;
+      // Skip initial load
+      if (syncArticleIdRef.current === null) {
+          syncArticleIdRef.current = activeArticleId;
           return;
       }
 
       // If article changed (file opened or closed)
-      if (previousArticleIdRef.current !== activeArticleId) {
+      if (syncArticleIdRef.current !== activeArticleId) {
           const fileName = settings.feishuFileName || 'reader-state.json';
           
           const buildBackup = (): BackupData => ({
@@ -367,7 +369,7 @@ function App() {
               console.warn("Feishu sync on file change failed", e);
           });
 
-          previousArticleIdRef.current = activeArticleId;
+          syncArticleIdRef.current = activeArticleId;
       }
   }, [activeArticleId, settings.useFeishuStorage, settings.feishuFolderToken, settings.feishuFileName, settings.feishuUserAccessToken, articles, savedItems, historyRecords, wordStats, readingSessions, settings]);
 
