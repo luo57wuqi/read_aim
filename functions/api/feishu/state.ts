@@ -97,94 +97,55 @@ async function uploadJsonFile(
   
   const blob = new Blob([content], { type: 'application/json' });
   
-  // Try multiple parameter combinations to find the correct format
-  const attempts = [
-    // Attempt 1: Standard format with file_name and explorer
-    {
-      file_name: fileName,
-      parent_type: 'explorer',
-      parent_token: folderToken,
-    },
-    // Attempt 2: With name instead of file_name
-    {
-      name: fileName,
-      parent_type: 'explorer',
-      parent_token: folderToken,
-    },
-    // Attempt 3: Try with drive_folder instead of explorer
-    {
-      file_name: fileName,
-      parent_type: 'drive_folder',
-      parent_token: folderToken,
-    },
-    // Attempt 4: Try with space instead of explorer
-    {
-      file_name: fileName,
-      parent_type: 'space',
-      parent_token: folderToken,
-    },
-    // Attempt 5: Minimal format - only file_name and file
-    {
-      file_name: fileName,
-    },
-  ];
-
-  let lastError: string = '';
+  // According to Feishu API documentation, upload_all requires:
+  // - file_name: the file name
+  // - parent_type: "explorer" for folder
+  // - parent_node: the folder token (NOT parent_token!)
+  // - size: file size in bytes
+  // - file: the file content as binary
   
-  for (const params of attempts) {
-    const form = new FormData();
-    
-    // Add all parameters except file
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value === 'object') {
-        form.append(key, JSON.stringify(value));
-      } else {
-        form.append(key, value as string);
-      }
-    }
-    
-    // Add file content
-    form.append('file', blob, fileName);
+  const fileSize = blob.size;
+  
+  const form = new FormData();
+  form.append('file_name', fileName);
+  form.append('parent_type', 'explorer');
+  form.append('parent_node', folderToken); // Correct parameter name from Feishu API docs!
+  form.append('size', fileSize.toString());
+  form.append('file', blob, fileName);
 
-    const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: form,
-    });
+  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: form,
+  });
 
-    const responseText = await res.text();
-    let body: FeishuCommonResp<{ file?: any }>;
-    
-    try {
-      body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
-    } catch {
-      lastError = `Response parse failed: ${responseText.substring(0, 200)}`;
-      continue;
-    }
-
-    if (body.code === 0) {
-      return body.data?.file;
-    }
-
-    // If not params error, return immediately (don't try other formats)
-    if (body.code !== 1061002) {
-      throw new Error(
-        `Feishu upload API error: code=${body.code}, msg=${body.msg}. ` +
-        `Full response: ${responseText}`
-      );
-    }
-
-    lastError = `Params error (${body.code}): ${body.msg}`;
+  const responseText = await res.text();
+  let body: FeishuCommonResp<{ file_token?: string; file?: any }>;
+  
+  try {
+    body = JSON.parse(responseText) as FeishuCommonResp<{ file_token?: string; file?: any }>;
+  } catch (parseError) {
+    throw new Error(
+      `Feishu upload failed: ${res.status} ${res.statusText}. ` +
+      `Response (first 500 chars): ${responseText.substring(0, 500)}`
+    );
   }
 
-  // All attempts failed
-  throw new Error(
-    `Feishu upload failed after trying ${attempts.length} parameter formats. ` +
-    `Last error: ${lastError}. ` +
-    `Please check Feishu API documentation for correct upload_all parameters.`
-  );
+  if (body.code !== 0) {
+    throw new Error(
+      `Feishu upload API error: code=${body.code}, msg=${body.msg}. ` +
+      `Full response: ${responseText}`
+    );
+  }
+
+  if (!res.ok) {
+    throw new Error(`Feishu upload HTTP error: ${res.status} ${res.statusText}`);
+  }
+
+  // Return file_token or file object
+  return body.data?.file_token ? { token: body.data.file_token } : body.data?.file;
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
