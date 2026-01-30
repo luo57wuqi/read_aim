@@ -1566,7 +1566,8 @@ function App() {
                     setToast("已手动同步到飞书 JSON 文件");
                 } catch (e: any) {
                     console.error("Manual Feishu sync failed", e);
-                    setToast("同步飞书失败，请检查 user_access_token 和 Cloudflare Function");
+                    const errorMsg = e?.message || String(e);
+                    setToast(`同步飞书失败: ${errorMsg}`);
                 }
             }}
           />

@@ -22,18 +22,45 @@ export const feishuStorageApi = {
       fileName
     )}`;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${userAccessToken}`,
-      },
-    });
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${userAccessToken}`,
+        },
+      });
 
-    if (!res.ok) throw new Error(`Feishu pull failed: ${res.status} ${res.statusText}`);
-    const data = await res.json();
-    // Functions may return { ok: false, error: ... }
-    if (data && data.ok === false) return null;
-    return data as BackupData;
+      if (!res.ok) {
+        // 404 FILE_NOT_FOUND is expected when file doesn't exist yet
+        if (res.status === 404) {
+          return null;
+        }
+        const errorText = await res.text().catch(() => '');
+        let errorMsg = `Feishu pull failed: ${res.status} ${res.statusText}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg += ` - ${errorJson.error || errorText}`;
+        } catch {
+          errorMsg += ` - ${errorText || 'No error details'}`;
+        }
+        throw new Error(errorMsg);
+      }
+      
+      const data = await res.json();
+      // Functions may return { ok: false, error: ... }
+      if (data && data.ok === false) return null;
+      return data as BackupData;
+    } catch (e: any) {
+      // Enhanced error message for "Failed to fetch"
+      if (e?.message?.includes('Failed to fetch') || e?.name === 'TypeError') {
+        throw new Error(
+          `Network error: Cannot reach /api/feishu/state. ` +
+          `Please check: 1) Cloudflare Function is deployed, 2) Route is correct, 3) Network connection. ` +
+          `Original: ${e?.message || String(e)}`
+        );
+      }
+      throw e;
+    }
   },
 
   pushState: async (
@@ -50,20 +77,46 @@ export const feishuStorageApi = {
       fileName
     )}`;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userAccessToken}`,
-      },
-      body: JSON.stringify(state),
-      // Allow the request to continue during page close on supporting browsers
-      keepalive: true,
-    } as any);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userAccessToken}`,
+        },
+        body: JSON.stringify(state),
+        // Allow the request to continue during page close on supporting browsers
+        keepalive: true,
+      } as any);
 
-    if (!res.ok) throw new Error(`Feishu push failed: ${res.status} ${res.statusText}`);
-    const data = await res.json().catch(() => ({}));
-    return data?.ok !== false;
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        let errorMsg = `Feishu push failed: ${res.status} ${res.statusText}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg += ` - ${errorJson.error || errorText}`;
+        } catch {
+          errorMsg += ` - ${errorText || 'No error details'}`;
+        }
+        throw new Error(errorMsg);
+      }
+      
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok === false) {
+        throw new Error(`Feishu push failed: ${data.error || 'Unknown error'}`);
+      }
+      return true;
+    } catch (e: any) {
+      // Enhanced error message for "Failed to fetch"
+      if (e?.message?.includes('Failed to fetch') || e?.name === 'TypeError') {
+        throw new Error(
+          `Network error: Cannot reach /api/feishu/state. ` +
+          `Please check: 1) Cloudflare Function is deployed, 2) Route is correct, 3) Network connection. ` +
+          `Original: ${e?.message || String(e)}`
+        );
+      }
+      throw e;
+    }
   },
 };
 

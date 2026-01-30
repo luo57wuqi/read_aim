@@ -605,14 +605,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 <span className="text-xs text-slate-500">Sync full app state JSON to Feishu Drive via <code>/api/feishu/state</code>.</span>
                             </div>
                             <div className="flex items-center gap-3">
-                                {onFeishuSyncNow && localSettings.useFeishuStorage && (
-                                    <button
-                                        type="button"
-                                        onClick={onFeishuSyncNow}
-                                        className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-full hover:bg-emerald-700"
-                                    >
-                                        立即同步飞书
-                                    </button>
+                                {localSettings.useFeishuStorage && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    const res = await fetch('/api/feishu/health');
+                                                    const data = await res.json();
+                                                    if (data.ok) {
+                                                        setPresetMessage('✅ Cloudflare Function 连接正常');
+                                                    } else {
+                                                        setPresetMessage('❌ Cloudflare Function 响应异常');
+                                                    }
+                                                } catch (e: any) {
+                                                    setPresetMessage(`❌ 无法连接到 /api/feishu/health: ${e?.message || String(e)}`);
+                                                }
+                                            }}
+                                            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-full hover:bg-blue-700"
+                                        >
+                                            测试连接
+                                        </button>
+                                        {onFeishuSyncNow && (
+                                            <button
+                                                type="button"
+                                                onClick={onFeishuSyncNow}
+                                                className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-full hover:bg-emerald-700"
+                                            >
+                                                立即同步飞书
+                                            </button>
+                                        )}
+                                    </>
                                 )}
                                 <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
                                     <input
