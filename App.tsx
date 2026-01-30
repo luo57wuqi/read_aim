@@ -294,10 +294,15 @@ function App() {
           }
       };
 
-      const handleBeforeUnload = () => {
-          // Best effort only; request may not finish.
-          // keepalive: true is set in feishuStorageApi.
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+          // Show confirmation dialog and sync
+          e.preventDefault();
+          e.returnValue = '确定要关闭吗？未保存的数据将同步到飞书。';
+          
+          // Try to sync (best effort, may not complete)
           push();
+          
+          return e.returnValue;
       };
 
       document.addEventListener('visibilitychange', handleVisibility);
@@ -313,6 +318,7 @@ function App() {
       settings.useFeishuStorage,
       settings.feishuFolderToken,
       settings.feishuFileName,
+      settings.feishuUserAccessToken,
       // Data dependencies
       articles,
       savedItems,
@@ -321,6 +327,49 @@ function App() {
       readingSessions,
       settings,
   ]);
+
+  // Sync when active article changes (file open/close)
+  useEffect(() => {
+      if (!settings.useFeishuStorage) return;
+      if (!settings.feishuFolderToken) return;
+      if (!settings.feishuUserAccessToken) return;
+      
+      // Skip initial load (when previousArticleIdRef is null and activeArticleId is set for first time)
+      if (previousArticleIdRef.current === null && activeArticleId !== null) {
+          previousArticleIdRef.current = activeArticleId;
+          return;
+      }
+
+      // If article changed (file opened or closed)
+      if (previousArticleIdRef.current !== activeArticleId) {
+          const fileName = settings.feishuFileName || 'reader-state.json';
+          
+          const buildBackup = (): BackupData => ({
+              version: 1,
+              timestamp: Date.now(),
+              articles,
+              savedItems,
+              historyRecords,
+              wordStats,
+              settings,
+              sessions: readingSessions,
+          });
+
+          // Sync when file changes
+          feishuStorageApi.pushState(
+              settings.feishuFolderToken!,
+              fileName,
+              buildBackup(),
+              settings.feishuUserAccessToken
+          ).then(() => {
+              setToast('✅ 文件切换已自动同步');
+          }).catch((e) => {
+              console.warn("Feishu sync on file change failed", e);
+          });
+
+          previousArticleIdRef.current = activeArticleId;
+      }
+  }, [activeArticleId, settings.useFeishuStorage, settings.feishuFolderToken, settings.feishuFileName, settings.feishuUserAccessToken, articles, savedItems, historyRecords, wordStats, readingSessions, settings]);
 
   // Persist State (Local backup always happens)
   useEffect(() => {
