@@ -57,28 +57,48 @@ async function downloadFileContent(accessToken: string, fileToken: string): Prom
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=utf-8',
     },
   });
 
   if (!res.ok) {
-    throw new Error(`Feishu download failed: ${res.status} ${res.statusText}`);
+    const errorText = await res.text().catch(() => '');
+    throw new Error(
+      `Feishu download failed: ${res.status} ${res.statusText}. ` +
+      `Response: ${errorText.substring(0, 200)}`
+    );
   }
 
   return await res.text();
 }
 
 async function deleteFile(accessToken: string, fileToken: string): Promise<void> {
-  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/${fileToken}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  // According to Feishu API docs, delete requires type query parameter
+  const res = await fetch(
+    `${FEISHU_BASE}/open-apis/drive/v1/files/${fileToken}?type=file`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
     },
-  });
+  );
 
   // Best-effort delete: log but don't throw to avoid blocking writes.
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     console.warn('Feishu delete failed', res.status, res.statusText, text);
+  } else {
+    // Check response body for error code
+    try {
+      const body = await res.json();
+      if (body.code !== 0) {
+        console.warn('Feishu delete API error', body.code, body.msg);
+      }
+    } catch {
+      // Response is not JSON, which is fine for DELETE
+    }
   }
 }
 
