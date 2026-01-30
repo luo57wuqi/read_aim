@@ -504,6 +504,108 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             </p>
                         </div>
 
+                        {/* Base64 配置导入 */}
+                        <div className="bg-white p-3 rounded-lg border border-emerald-200 mb-3">
+                            <label className="block text-[11px] text-slate-600 mb-2 font-bold">快速导入配置 (Base64)</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    id="feishu-base64-config"
+                                    placeholder="粘贴 base64 编码的配置 JSON"
+                                    className="flex-1 p-2 border border-slate-300 rounded font-mono text-[10px]"
+                                    onPaste={async (e) => {
+                                        const pastedText = e.clipboardData.getData('text');
+                                        try {
+                                            const decoded = atob(pastedText.trim());
+                                            const config = JSON.parse(decoded);
+                                            
+                                            const updates: Partial<AppSettings> = {};
+                                            if (config.feishuFolderToken) updates.feishuFolderToken = config.feishuFolderToken;
+                                            if (config.feishuFileName) updates.feishuFileName = config.feishuFileName;
+                                            if (config.feishuUserAccessToken) updates.feishuUserAccessToken = config.feishuUserAccessToken;
+                                            if (config.feishuAppId) updates.feishuAppId = config.feishuAppId;
+                                            if (config.feishuAppSecret) updates.feishuAppSecret = config.feishuAppSecret;
+                                            if (config.feishuRedirectUri) updates.feishuRedirectUri = config.feishuRedirectUri;
+                                            
+                                            if (Object.keys(updates).length > 0) {
+                                                setLocalSettings(p => ({ ...p, ...updates }));
+                                                setPresetMessage('✅ 配置已自动填写');
+                                                setTimeout(() => {
+                                                    (e.currentTarget as HTMLInputElement).value = '';
+                                                }, 100);
+                                            }
+                                        } catch (error) {
+                                            // Auto-decode failed, user can click decode button
+                                        }
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const input = document.getElementById('feishu-base64-config') as HTMLInputElement;
+                                        if (!input || !input.value.trim()) {
+                                            setPresetMessage('❌ 请输入 base64 编码的配置');
+                                            return;
+                                        }
+                                        
+                                        try {
+                                            const decoded = atob(input.value.trim());
+                                            const config = JSON.parse(decoded);
+                                            
+                                            const updates: Partial<AppSettings> = {};
+                                            if (config.feishuFolderToken) updates.feishuFolderToken = config.feishuFolderToken;
+                                            if (config.feishuFileName) updates.feishuFileName = config.feishuFileName;
+                                            if (config.feishuUserAccessToken) updates.feishuUserAccessToken = config.feishuUserAccessToken;
+                                            if (config.feishuAppId) updates.feishuAppId = config.feishuAppId;
+                                            if (config.feishuAppSecret) updates.feishuAppSecret = config.feishuAppSecret;
+                                            if (config.feishuRedirectUri) updates.feishuRedirectUri = config.feishuRedirectUri;
+                                            
+                                            if (Object.keys(updates).length > 0) {
+                                                setLocalSettings(p => ({ ...p, ...updates }));
+                                                setPresetMessage('✅ 配置已自动填写');
+                                                input.value = '';
+                                            } else {
+                                                setPresetMessage('⚠️ 未找到有效的配置字段');
+                                            }
+                                        } catch (error: any) {
+                                            setPresetMessage(`❌ 解码失败: ${error?.message || '无效的 base64 或 JSON 格式'}`);
+                                        }
+                                    }}
+                                    className="px-3 py-2 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 whitespace-nowrap"
+                                >
+                                    解码填写
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const config = {
+                                            feishuFolderToken: localSettings.feishuFolderToken || '',
+                                            feishuFileName: localSettings.feishuFileName || 'reader-state.json',
+                                            feishuUserAccessToken: localSettings.feishuUserAccessToken || '',
+                                            feishuAppId: localSettings.feishuAppId || '',
+                                            feishuAppSecret: localSettings.feishuAppSecret || '',
+                                            feishuRedirectUri: localSettings.feishuRedirectUri || '',
+                                        };
+                                        
+                                        const base64 = btoa(JSON.stringify(config, null, 2));
+                                        
+                                        navigator.clipboard.writeText(base64).then(() => {
+                                            setPresetMessage('✅ Base64 配置已复制到剪贴板');
+                                        }).catch(() => {
+                                            alert(`Base64 配置:\n\n${base64}`);
+                                        });
+                                    }}
+                                    className="px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 whitespace-nowrap"
+                                    title="将当前配置编码为 base64 并复制"
+                                >
+                                    导出配置
+                                </button>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-2">
+                                支持格式：<code className="bg-slate-100 px-1 rounded">{"{"}"feishuFolderToken": "...", "feishuFileName": "...", "feishuUserAccessToken": "..."{"}"}</code> 的 base64 编码
+                            </p>
+                        </div>
+
                         {/* Feishu Config */}
                         <div className="space-y-3">
                             <div>
