@@ -88,78 +88,84 @@ async function uploadJsonFile(
   fileName: string,
   content: string,
 ): Promise<any> {
-  // Method 1: Try upload_all with different parameter combinations
-  // According to Feishu API, upload_all may require specific field names
-  // Try with "name" instead of "file_name" first
-  const form1 = new FormData();
-  form1.append('name', fileName); // Try "name" instead of "file_name"
-  form1.append('parent_type', 'explorer');
-  form1.append('parent_token', folderToken);
+  // Method: Use two-step approach - create file metadata first, then upload content
+  // Step 1: Create file metadata using drive/v1/files endpoint
+  const createRes = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({
+      name: fileName,
+      type: 'file',
+      parent_type: 'explorer',
+      parent_token: folderToken,
+    }),
+  });
+
+  const createText = await createRes.text();
+  let createBody: FeishuCommonResp<{ file?: { token?: string } }>;
+  
+  try {
+    createBody = JSON.parse(createText) as FeishuCommonResp<{ file?: { token?: string } }>;
+  } catch {
+    throw new Error(
+      `Feishu create file failed: ${createRes.status} ${createRes.statusText}. ` +
+      `Response: ${createText.substring(0, 500)}`
+    );
+  }
+
+  if (createBody.code !== 0 || !createBody.data?.file?.token) {
+    throw new Error(
+      `Feishu create file failed: code=${createBody.code}, msg=${createBody.msg}. ` +
+      `Response: ${createText}`
+    );
+  }
+
+  const fileToken = createBody.data.file.token;
+
+  // Step 2: Upload file content using upload_all with file_token
+  const form = new FormData();
+  form.append('file_token', fileToken);
+  form.append('file_name', fileName);
   
   const blob = new Blob([content], { type: 'application/json' });
-  form1.append('file', blob, fileName);
+  form.append('file', blob, fileName);
 
-  let res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
+  const uploadRes = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
-    body: form1,
+    body: form,
   });
 
-  let responseText = await res.text();
-  let body: FeishuCommonResp<{ file?: any }>;
+  const uploadText = await uploadRes.text();
+  let uploadBody: FeishuCommonResp<{ file?: any }>;
   
   try {
-    body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
-  } catch (parseError) {
+    uploadBody = JSON.parse(uploadText) as FeishuCommonResp<{ file?: any }>;
+  } catch {
     throw new Error(
-      `Feishu upload failed: ${res.status} ${res.statusText}. ` +
-      `Response (first 500 chars): ${responseText.substring(0, 500)}`
+      `Feishu upload content failed: ${uploadRes.status} ${uploadRes.statusText}. ` +
+      `Response: ${uploadText.substring(0, 500)}`
     );
   }
 
-  // If "name" doesn't work, try "file_name"
-  if (body.code === 1061002) {
-    const form2 = new FormData();
-    form2.append('file_name', fileName); // Try "file_name"
-    form2.append('parent_type', 'explorer');
-    form2.append('parent_token', folderToken);
-    form2.append('file', blob, fileName);
-
-    res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: form2,
-    });
-
-    responseText = await res.text();
-    try {
-      body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
-    } catch {
-      throw new Error(
-        `Feishu upload failed with both "name" and "file_name". ` +
-        `Last response: ${res.status} ${res.statusText}. ` +
-        `Response: ${responseText.substring(0, 500)}`
-      );
-    }
-  }
-
-  if (body.code !== 0) {
+  if (uploadBody.code !== 0) {
     throw new Error(
-      `Feishu upload API error: code=${body.code}, msg=${body.msg}. ` +
-      `Tried both "name" and "file_name" field names. ` +
-      `Full response: ${responseText}`
+      `Feishu upload content failed: code=${uploadBody.code}, msg=${uploadBody.msg}. ` +
+      `File was created with token: ${fileToken}. ` +
+      `Full response: ${uploadText}`
     );
   }
 
-  if (!res.ok) {
-    throw new Error(`Feishu upload HTTP error: ${res.status} ${res.statusText}`);
+  if (!uploadRes.ok) {
+    throw new Error(`Feishu upload HTTP error: ${uploadRes.status} ${uploadRes.statusText}`);
   }
 
-  return body.data?.file;
+  return uploadBody.data?.file || { token: fileToken };
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
