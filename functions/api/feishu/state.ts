@@ -99,7 +99,7 @@ async function uploadJsonFile(
   
   // Try multiple parameter combinations to find the correct format
   const attempts = [
-    // Attempt 1: Standard format with file_name
+    // Attempt 1: Standard format with file_name and explorer
     {
       file_name: fileName,
       parent_type: 'explorer',
@@ -111,13 +111,21 @@ async function uploadJsonFile(
       parent_type: 'explorer',
       parent_token: folderToken,
     },
-    // Attempt 3: With parent as object (if API requires it)
+    // Attempt 3: Try with drive_folder instead of explorer
     {
       file_name: fileName,
-      parent: {
-        type: 'explorer',
-        token: folderToken,
-      },
+      parent_type: 'drive_folder',
+      parent_token: folderToken,
+    },
+    // Attempt 4: Try with space instead of explorer
+    {
+      file_name: fileName,
+      parent_type: 'space',
+      parent_token: folderToken,
+    },
+    // Attempt 5: Minimal format - only file_name and file
+    {
+      file_name: fileName,
     },
   ];
 
