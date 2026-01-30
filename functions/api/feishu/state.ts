@@ -88,24 +88,23 @@ async function uploadJsonFile(
   fileName: string,
   content: string,
 ): Promise<any> {
-  // Try method 1: upload_all (most common for small files)
-  // Note: Feishu API may require specific field names or formats
-  const form = new FormData();
-  
-  // Try different possible field name combinations
-  form.set('file_name', fileName);
-  form.set('parent_type', 'explorer');
-  form.set('parent_token', folderToken);
+  // Method 1: Try upload_all with different parameter combinations
+  // According to Feishu API, upload_all may require specific field names
+  // Try with "name" instead of "file_name" first
+  const form1 = new FormData();
+  form1.append('name', fileName); // Try "name" instead of "file_name"
+  form1.append('parent_type', 'explorer');
+  form1.append('parent_token', folderToken);
   
   const blob = new Blob([content], { type: 'application/json' });
-  form.set('file', blob, fileName);
+  form1.append('file', blob, fileName);
 
   let res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
-    body: form,
+    body: form1,
   });
 
   let responseText = await res.text();
@@ -120,25 +119,20 @@ async function uploadJsonFile(
     );
   }
 
-  // If upload_all fails with 400, try alternative: create file with content
-  if (body.code !== 0 && res.status === 400) {
-    console.warn(`upload_all failed (${body.code}): ${body.msg}. Trying create file method...`);
-    
-    // Alternative: Create file using drive/v1/files endpoint
-    // This endpoint might accept file content directly
-    const createForm = new FormData();
-    createForm.set('name', fileName);
-    createForm.set('type', 'file');
-    createForm.set('parent_type', 'explorer');
-    createForm.set('parent_token', folderToken);
-    createForm.set('file', blob, fileName);
+  // If "name" doesn't work, try "file_name"
+  if (body.code === 1061002) {
+    const form2 = new FormData();
+    form2.append('file_name', fileName); // Try "file_name"
+    form2.append('parent_type', 'explorer');
+    form2.append('parent_token', folderToken);
+    form2.append('file', blob, fileName);
 
-    res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files`, {
+    res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
-      body: createForm,
+      body: form2,
     });
 
     responseText = await res.text();
@@ -146,24 +140,18 @@ async function uploadJsonFile(
       body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
     } catch {
       throw new Error(
-        `Both upload methods failed. upload_all: ${body.code} ${body.msg}, ` +
-        `create file: ${res.status} ${res.statusText}. ` +
+        `Feishu upload failed with both "name" and "file_name". ` +
+        `Last response: ${res.status} ${res.statusText}. ` +
         `Response: ${responseText.substring(0, 500)}`
       );
     }
+  }
 
-    if (body.code !== 0) {
-      throw new Error(
-        `Feishu upload failed. upload_all: code=${body.code}, msg=${body.msg}. ` +
-        `create file: code=${body.code}, msg=${body.msg}. ` +
-        `Please check Feishu API documentation for correct upload format. ` +
-        `Full response: ${responseText.substring(0, 500)}`
-      );
-    }
-  } else if (body.code !== 0) {
+  if (body.code !== 0) {
     throw new Error(
       `Feishu upload API error: code=${body.code}, msg=${body.msg}. ` +
-      `Full response: ${responseText.substring(0, 500)}`
+      `Tried both "name" and "file_name" field names. ` +
+      `Full response: ${responseText}`
     );
   }
 
