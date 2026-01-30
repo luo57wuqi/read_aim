@@ -88,16 +88,19 @@ async function uploadJsonFile(
   fileName: string,
   content: string,
 ): Promise<any> {
+  // Try method 1: upload_all (most common for small files)
+  // Note: Feishu API may require specific field names or formats
   const form = new FormData();
+  
+  // Try different possible field name combinations
   form.set('file_name', fileName);
   form.set('parent_type', 'explorer');
   form.set('parent_token', folderToken);
-
-  const blob = new Blob([content], { type: 'application/json; charset=utf-8' });
-  // Field name "file" is commonly used by Feishu Drive upload_all API; adjust if docs differ.
+  
+  const blob = new Blob([content], { type: 'application/json' });
   form.set('file', blob, fileName);
 
-  const res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
+  let res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files/upload_all`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -105,13 +108,67 @@ async function uploadJsonFile(
     body: form,
   });
 
-  if (!res.ok) {
-    throw new Error(`Feishu upload failed: ${res.status} ${res.statusText}`);
+  let responseText = await res.text();
+  let body: FeishuCommonResp<{ file?: any }>;
+  
+  try {
+    body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
+  } catch (parseError) {
+    throw new Error(
+      `Feishu upload failed: ${res.status} ${res.statusText}. ` +
+      `Response (first 500 chars): ${responseText.substring(0, 500)}`
+    );
   }
 
-  const body = (await res.json()) as FeishuCommonResp<{ file?: any }>;
-  if (body.code !== 0) {
-    throw new Error(`Feishu upload error: ${body.code} ${body.msg}`);
+  // If upload_all fails with 400, try alternative: create file with content
+  if (body.code !== 0 && res.status === 400) {
+    console.warn(`upload_all failed (${body.code}): ${body.msg}. Trying create file method...`);
+    
+    // Alternative: Create file using drive/v1/files endpoint
+    // This endpoint might accept file content directly
+    const createForm = new FormData();
+    createForm.set('name', fileName);
+    createForm.set('type', 'file');
+    createForm.set('parent_type', 'explorer');
+    createForm.set('parent_token', folderToken);
+    createForm.set('file', blob, fileName);
+
+    res = await fetch(`${FEISHU_BASE}/open-apis/drive/v1/files`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: createForm,
+    });
+
+    responseText = await res.text();
+    try {
+      body = JSON.parse(responseText) as FeishuCommonResp<{ file?: any }>;
+    } catch {
+      throw new Error(
+        `Both upload methods failed. upload_all: ${body.code} ${body.msg}, ` +
+        `create file: ${res.status} ${res.statusText}. ` +
+        `Response: ${responseText.substring(0, 500)}`
+      );
+    }
+
+    if (body.code !== 0) {
+      throw new Error(
+        `Feishu upload failed. upload_all: code=${body.code}, msg=${body.msg}. ` +
+        `create file: code=${body.code}, msg=${body.msg}. ` +
+        `Please check Feishu API documentation for correct upload format. ` +
+        `Full response: ${responseText.substring(0, 500)}`
+      );
+    }
+  } else if (body.code !== 0) {
+    throw new Error(
+      `Feishu upload API error: code=${body.code}, msg=${body.msg}. ` +
+      `Full response: ${responseText.substring(0, 500)}`
+    );
+  }
+
+  if (!res.ok) {
+    throw new Error(`Feishu upload HTTP error: ${res.status} ${res.statusText}`);
   }
 
   return body.data?.file;
@@ -172,18 +229,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return json({ ok: false, error: 'Body must be valid JSON' }, 400);
       }
 
-      const files = await listFolderFiles(userAccessToken, folderToken);
-      const existing = files.find((f: any) => f.name === fileName);
+      try {
+        const files = await listFolderFiles(userAccessToken, folderToken);
+        const existing = files.find((f: any) => f.name === fileName);
 
-      if (existing) {
-        const fileToken = (existing.token || existing.file_token) as string | undefined;
-        if (fileToken) {
-          await deleteFile(userAccessToken, fileToken);
+        if (existing) {
+          const fileToken = (existing.token || existing.file_token) as string | undefined;
+          if (fileToken) {
+            await deleteFile(userAccessToken, fileToken);
+          }
         }
-      }
 
-      await uploadJsonFile(userAccessToken, folderToken, fileName, JSON.stringify(parsed));
-      return json({ ok: true }, 200);
+        await uploadJsonFile(userAccessToken, folderToken, fileName, JSON.stringify(parsed));
+        return json({ ok: true }, 200);
+      } catch (uploadError: any) {
+        // Return detailed error for debugging
+        return json(
+          {
+            ok: false,
+            error: uploadError?.message || String(uploadError),
+            details: 'Check Cloudflare Function logs for Feishu API response details',
+          },
+          500,
+        );
+      }
     }
 
     return json({ ok: false, error: 'Method not allowed' }, 405);
