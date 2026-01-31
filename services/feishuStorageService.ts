@@ -53,10 +53,14 @@ export const feishuStorageApi = {
     } catch (e: any) {
       // Enhanced error message for "Failed to fetch"
       if (e?.message?.includes('Failed to fetch') || e?.name === 'TypeError') {
+        const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+        const localDevHint = isLocalhost 
+          ? '\n\n💡 本地开发提示：Cloudflare Pages Functions 需要在本地运行。请使用以下命令启动：\n   npm run build && npm run dev:cf\n   或者部署到 Cloudflare Pages 后使用。'
+          : '';
         throw new Error(
           `Network error: Cannot reach /api/feishu/state. ` +
           `Please check: 1) Cloudflare Function is deployed, 2) Route is correct, 3) Network connection. ` +
-          `Original: ${e?.message || String(e)}`
+          `${localDevHint}\nOriginal: ${e?.message || String(e)}`
         );
       }
       throw e;
@@ -109,10 +113,14 @@ export const feishuStorageApi = {
     } catch (e: any) {
       // Enhanced error message for "Failed to fetch"
       if (e?.message?.includes('Failed to fetch') || e?.name === 'TypeError') {
+        const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+        const localDevHint = isLocalhost 
+          ? '\n\n💡 本地开发提示：Cloudflare Pages Functions 需要在本地运行。请使用以下命令启动：\n   npm run build && npm run dev:cf\n   或者部署到 Cloudflare Pages 后使用。'
+          : '';
         throw new Error(
           `Network error: Cannot reach /api/feishu/state. ` +
           `Please check: 1) Cloudflare Function is deployed, 2) Route is correct, 3) Network connection. ` +
-          `Original: ${e?.message || String(e)}`
+          `${localDevHint}\nOriginal: ${e?.message || String(e)}`
         );
       }
       throw e;
