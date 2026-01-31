@@ -4,7 +4,7 @@
  */
 export interface Env {}
 
-export const onRequest: PagesFunction<Env> = async () => {
+export const onRequest = async () => {
   return new Response(
     JSON.stringify({
       ok: true,

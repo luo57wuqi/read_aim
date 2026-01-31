@@ -171,7 +171,7 @@ async function uploadJsonFile(
   return body.data?.file_token ? { token: body.data.file_token } : body.data?.file;
 }
 
-export const onRequest: PagesFunction<Env> = async (context) => {
+export const onRequest = async (context: { request: Request; env: Env }) => {
   try {
     const url = new URL(context.request.url);
     const folderToken = url.searchParams.get('folder_token') || '';
