@@ -1621,6 +1621,115 @@ function App() {
                     setToast(`同步飞书失败: ${errorMsg}`);
                 }
             }}
+            onFeishuPull={async () => {
+                if (!settings.useFeishuStorage) {
+                    setToast("请先启用飞书服务器开关");
+                    return;
+                }
+                if (!settings.feishuFolderToken) {
+                    setToast("请先填写 Feishu Folder Token");
+                    return;
+                }
+                if (!settings.feishuUserAccessToken) {
+                    setToast("请先填写 Feishu User Access Token");
+                    return;
+                }
+                try {
+                    const folderToken = settings.feishuFolderToken;
+                    const fileName = settings.feishuFileName || 'reader-state.json';
+                    const userToken = settings.feishuUserAccessToken;
+                    
+                    setToast("正在从飞书拉取数据...");
+                    const remote = await feishuStorageApi.pullState(folderToken, fileName, userToken);
+                    
+                    if (remote) {
+                        // Confirm before overwriting
+                        const confirmed = window.confirm(
+                            "确定要从飞书拉取数据吗？这将覆盖当前所有本地数据（文章、单词、历史记录等）。\n\n" +
+                            "点击"确定"继续，点击"取消"放弃。"
+                        );
+                        
+                        if (confirmed) {
+                            setArticles(remote.articles || []);
+                            setSavedItems(remote.savedItems || []);
+                            setHistoryRecords(remote.historyRecords || []);
+                            setWordStats(remote.wordStats || {});
+                            setReadingSessions(remote.sessions || []);
+                            
+                            // Update settings but keep Feishu settings
+                            setSettings(prev => ({
+                                ...DEFAULT_SETTINGS,
+                                ...(remote.settings || {}),
+                                useFeishuStorage: true,
+                                useServerStorage: false,
+                                feishuFolderToken: prev.feishuFolderToken || folderToken,
+                                feishuFileName: prev.feishuFileName || fileName,
+                                feishuUserAccessToken: prev.feishuUserAccessToken || userToken,
+                            }));
+                            
+                            // Persist to localStorage
+                            localStorage.setItem('english_reader_articles', JSON.stringify(remote.articles || []));
+                            localStorage.setItem('english_reader_saved_items', JSON.stringify(remote.savedItems || []));
+                            localStorage.setItem('english_reader_history_records', JSON.stringify(remote.historyRecords || []));
+                            localStorage.setItem('english_reader_word_stats', JSON.stringify(remote.wordStats || {}));
+                            localStorage.setItem('english_reader_sessions', JSON.stringify(remote.sessions || []));
+                            
+                            setToast("✅ 已从飞书拉取最新数据");
+                            
+                            // Set first article as active if available
+                            if ((remote.articles || []).length > 0) {
+                                setActiveArticleId(remote.articles[0].id);
+                            }
+                        } else {
+                            setToast("已取消拉取");
+                        }
+                    } else {
+                        setToast("⚠️ 飞书中没有找到数据文件");
+                    }
+                } catch (e: any) {
+                    console.error("Feishu pull failed", e);
+                    const errorMsg = e?.message || String(e);
+                    setToast(`拉取飞书数据失败: ${errorMsg}`);
+                }
+            }}
+            onFeishuPush={async () => {
+                if (!settings.useFeishuStorage) {
+                    setToast("请先启用飞书服务器开关");
+                    return;
+                }
+                if (!settings.feishuFolderToken) {
+                    setToast("请先填写 Feishu Folder Token");
+                    return;
+                }
+                if (!settings.feishuUserAccessToken) {
+                    setToast("请先填写 Feishu User Access Token");
+                    return;
+                }
+                try {
+                    const backup: BackupData = {
+                        version: 1,
+                        timestamp: Date.now(),
+                        articles,
+                        savedItems,
+                        historyRecords,
+                        wordStats,
+                        settings,
+                        sessions: readingSessions,
+                    };
+                    setToast("正在上传到飞书...");
+                    await feishuStorageApi.pushState(
+                        settings.feishuFolderToken,
+                        settings.feishuFileName || 'reader-state.json',
+                        backup,
+                        settings.feishuUserAccessToken
+                    );
+                    setToast("✅ 已上传到飞书");
+                } catch (e: any) {
+                    console.error("Feishu push failed", e);
+                    const errorMsg = e?.message || String(e);
+                    setToast(`上传到飞书失败: ${errorMsg}`);
+                }
+            }}
           />
       )}
 

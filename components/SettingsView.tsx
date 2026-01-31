@@ -17,6 +17,8 @@ interface SettingsViewProps {
   onImportData: (data: BackupData) => void;
   onMergeVocabulary: (items: SavedItem[]) => void;
   onFeishuSyncNow?: () => void;
+  onFeishuPull?: () => void;
+  onFeishuPush?: () => void;
 }
 
 const REQUIRED_JSON_FIELDS = [
@@ -71,7 +73,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     data,
     onImportData,
     onMergeVocabulary,
-    onFeishuSyncNow
+    onFeishuSyncNow,
+    onFeishuPull,
+    onFeishuPush
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [activeTab, setActiveTab] = useState<'general' | 'advanced' | 'server'>('general');
@@ -769,11 +773,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                         >
                                             测试连接
                                         </button>
+                                        {onFeishuPull && (
+                                            <button
+                                                type="button"
+                                                onClick={onFeishuPull}
+                                                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-full hover:bg-blue-700"
+                                                title="从飞书拉取最新数据（会覆盖当前本地数据）"
+                                            >
+                                                拉取飞书数据
+                                            </button>
+                                        )}
+                                        {onFeishuPush && (
+                                            <button
+                                                type="button"
+                                                onClick={onFeishuPush}
+                                                className="px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-full hover:bg-green-700"
+                                                title="上传当前数据到飞书（会覆盖远程数据）"
+                                            >
+                                                上传到飞书
+                                            </button>
+                                        )}
                                         {onFeishuSyncNow && (
                                             <button
                                                 type="button"
                                                 onClick={onFeishuSyncNow}
                                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-full hover:bg-emerald-700"
+                                                title="立即同步到飞书（等同于上传）"
                                             >
                                                 立即同步飞书
                                             </button>
