@@ -1646,7 +1646,7 @@ function App() {
                         // Confirm before overwriting
                         const confirmed = window.confirm(
                             "确定要从飞书拉取数据吗？这将覆盖当前所有本地数据（文章、单词、历史记录等）。\n\n" +
-                            "点击"确定"继续，点击"取消"放弃。"
+                            "点击\"确定\"继续，点击\"取消\"放弃。"
                         );
                         
                         if (confirmed) {
